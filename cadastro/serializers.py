@@ -1,7 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 from unidecode import unidecode
-from .models import Estado, Cidade, Pessoas, Pessoa, Cliente
+from .models import Estado, Cidade, Pessoas, Pessoa, Cliente, Empresa
 from .validators import (
     formatar_cep,
     formatar_cpf_cnpj,
@@ -136,4 +136,76 @@ class PessoasSerializer(BlankToNoneMixin, serializers.ModelSerializer):
 # Aliases para compatibilidade
 PessoaSerializer = PessoasSerializer
 ClienteSerializer = PessoasSerializer
+
+
+class EmpresaSerializer(BlankToNoneMixin, serializers.ModelSerializer):
+    blank_to_none_fields = ('cnpj', 'cep', 'celular', 'telefone', 'telefone2', 'email', 'site')
+
+    _FIELD_FORMATTERS = {
+        'cnpj': formatar_cpf_cnpj,
+        'cep': formatar_cep,
+        'celular': formatar_telefone,
+        'telefone': formatar_telefone,
+        'telefone2': formatar_telefone,
+    }
+
+    nome_exibicao = serializers.ReadOnlyField()
+    endereco_completo = serializers.ReadOnlyField()
+    documento_formatado = serializers.ReadOnlyField()
+    contatos_formatados = serializers.ReadOnlyField()
+    codigo_ibge_cidade = serializers.ReadOnlyField()
+    codigo_ibge_estado = serializers.ReadOnlyField()
+    dados_cabecalho_impressao = serializers.ReadOnlyField()
+
+    def to_internal_value(self, data):
+        if isinstance(data, dict):
+            copied = data.dict() if hasattr(data, 'dict') else data.copy()
+            for field_name, formatter in self._FIELD_FORMATTERS.items():
+                if field_name in copied and copied[field_name] is not None:
+                    copied[field_name] = formatter(copied[field_name])
+            data = copied
+        return super().to_internal_value(data)
+
+    class Meta:
+        model = Empresa
+        fields = (
+            'id',
+            'razao_social',
+            'nome_fantasia',
+            'nome_exibicao',
+            'cnpj',
+            'inscricao_estadual',
+            'inscricao_municipal',
+            'cnae',
+            'regime_tributario',
+            'endereco',
+            'numero',
+            'complemento',
+            'bairro',
+            'cep',
+            'cidade',
+            'codigo_ibge_cidade',
+            'codigo_ibge_estado',
+            'caixa_postal',
+            'telefone',
+            'telefone2',
+            'celular',
+            'email',
+            'site',
+            'chave_pix',
+            'responsavel',
+            'data_fundacao',
+            'slogan',
+            'logo',
+            'texto_cabecalho_impressao',
+            'texto_rodape_impressao',
+            'observacoes',
+            'matriz',
+            'ativa',
+            'endereco_completo',
+            'documento_formatado',
+            'contatos_formatados',
+            'dados_cabecalho_impressao',
+        )
+
 

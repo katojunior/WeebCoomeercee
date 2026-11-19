@@ -4,8 +4,8 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from django.urls import reverse
 from django.contrib.auth.models import User
-from .admin import PessoasAdmin
-from .models import Estado, Cidade, Pessoas, Pessoa, Cliente
+from .admin import PessoasAdmin, EmpresaAdmin
+from .models import Estado, Cidade, Pessoas, Pessoa, Cliente, Empresa
 
 
 class PessoasModelTestCase(TestCase):
@@ -365,3 +365,350 @@ class EstadoCidadeAPITestCase(APITestCase):
         output = out.getvalue()
         self.assertIn('MODO DRY-RUN ATIVADO', output)
         self.assertIn('Simulação concluída com sucesso', output)
+
+
+class EmpresaModelAndAPITestCase(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='admin_emp', password='password123')
+        self.client.force_authenticate(user=self.user)
+        self.sp = Estado.objects.create(codigoUf=35, uf='SP', estado='Sao Paulo', regiao='Sudeste')
+        self.birigui = Cidade.objects.create(
+            descricaoCidade='Birigui',
+            uf=self.sp,
+            codigoIbge='3506508',
+            ddd='18',
+        )
+
+    def test_criar_empresa_cabecalho_impressao_e_aliases(self):
+        emp = Empresa.objects.create(
+            razao_social='Edson Heiji Kato Birigui - ME',
+            nome_fantasia='Kato e Cia Informática',
+            cnpj='04831858000159',
+            inscricao_estadual='214.138.526-118',
+            endereco='Rua Gonçalo Ibanhes',
+            numero='484A',
+            bairro='Centro',
+            cep='16200192',
+            cidade=self.birigui,
+            telefone='1836421088',
+            telefone2='1836429424',
+            email='Contato@KatoInformatica.com.br',
+            slogan='Soluções em Informática e Assistência Técnica',
+            matriz=True,
+        )
+        self.assertEqual(emp.razao_social, 'EDSON HEIJI KATO BIRIGUI - ME')
+        self.assertEqual(emp.nome_fantasia, 'KATO E CIA INFORMATICA')
+        self.assertEqual(emp.cnpj, '04.831.858/0001-59')
+        self.assertEqual(emp.cep, '16200-192')
+        self.assertEqual(emp.telefone, '(18) 3642-1088')
+        self.assertEqual(emp.telefone2, '(18) 3642-9424')
+        self.assertEqual(emp.email, 'contato@katoinformatica.com.br')
+        self.assertEqual(emp.codigo_ibge_cidade, '3506508')
+        self.assertEqual(emp.codigo_ibge_estado, '35')
+        self.assertEqual(emp.razao_empresa, 'EDSON HEIJI KATO BIRIGUI - ME')
+        self.assertEqual(emp.fantasia_empresa, 'KATO E CIA INFORMATICA')
+        self.assertEqual(emp.cnpj_empresa, '04.831.858/0001-59')
+        self.assertEqual(emp.inscricao_empresa, '214.138.526-118')
+        self.assertEqual(emp.numero_emp, '484A')
+
+        cab = emp.dados_cabecalho_impressao
+        self.assertEqual(cab['titulo'], 'KATO E CIA INFORMATICA')
+        self.assertIn('CNPJ: 04.831.858/0001-59', cab['documento_formatado'])
+        self.assertIn('I.E.: 214.138.526-118', cab['documento_formatado'])
+        self.assertIn('RUA GONCALO IBANHES, Nº 484A', cab['endereco_completo'])
+        self.assertIn('BIRIGUI/SP', cab['endereco_completo'])
+        self.assertIn('(18) 3642-1088', cab['contatos_formatados'])
+        self.assertEqual(Empresa.get_principal(), emp)
+
+    def test_unicidade_matriz_e_api_principal(self):
+        e1 = Empresa.objects.create(razao_social='Matriz Original', cnpj='04.831.858/0001-59', matriz=True)
+        e2 = Empresa.objects.create(razao_social='Nova Matriz', cnpj='12.345.678/0001-95', matriz=True)
+        e1.refresh_from_db()
+        self.assertFalse(e1.matriz)
+        self.assertTrue(e2.matriz)
+
+        url = reverse('empresa_principal')
+        res = self.client.get(url)
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data['id'], e2.id)
+        self.assertIn('dados_cabecalho_impressao', res.data)
+
+    def test_importar_empresa_firebird(self):
+        import os
+        from io import StringIO
+        from django.conf import settings
+        from django.core.management import call_command
+
+        fdb_path = os.path.join(settings.BASE_DIR, 'INFYSK-ATUAL.FDB')
+        if not os.path.exists(fdb_path):
+            self.skipTest('Arquivo INFYSK-ATUAL.FDB não encontrado.')
+
+        out = StringIO()
+        call_command('importar_empresa_firebird', arquivo=fdb_path, limpar=True, stdout=out)
+        emp = Empresa.get_principal()
+        self.assertIsNotNone(emp)
+        self.assertEqual(emp.id, 1)
+        self.assertEqual(emp.razao_social, 'EDSON HEIJI KATO BIRIGUI - ME')
+        self.assertEqual(emp.nome_fantasia, 'KATO E CIA INFORMATICA')
+        self.assertEqual(emp.cnpj, '04.831.858/0001-59')
+        self.assertEqual(emp.inscricao_estadual, '214.138.526-118')
+        self.assertEqual(emp.endereco, 'RUA GONCALO IBANHES')
+        self.assertEqual(emp.numero, '484A')
+        self.assertEqual(emp.bairro, 'CENTRO')
+        self.assertEqual(emp.cep, '16200-192')
+        self.assertEqual(emp.cidade, self.birigui)
+        self.assertEqual(emp.telefone, '(18) 3642-1088')
+        self.assertEqual(emp.telefone2, '(18) 3642-9424')
+
+
+class ExtratoClienteAdminTestCase(TestCase):
+    def setUp(self):
+        from datetime import datetime
+        from decimal import Decimal
+        from django.utils import timezone
+        from cadastro_produto.models import Produtos
+        from ordem_servico.models import EquipamentoCliente, OrdemServico, ItemOrdemServico
+        from vendas.models import Venda, ItemVenda
+
+        self.admin_user = User.objects.create_superuser(username='super_ext', password='123', email='ext@e.com')
+        self.client.force_login(self.admin_user)
+
+        self.empresa = Empresa.objects.create(
+            razao_social='Edson Heiji Kato Birigui - ME',
+            nome_fantasia='Kato e Cia Informática',
+            cnpj='04.831.858/0001-59',
+            chave_pix='04.831.858/0001-59',
+            matriz=True,
+        )
+        self.cliente1 = Pessoas.objects.create(razao_nome='Cliente Extrato Alfa', juridica_fisica=1, tipo_pessoa=0)
+        self.cliente2 = Pessoas.objects.create(razao_nome='Cliente Outro Beta', juridica_fisica=1, tipo_pessoa=0)
+        self.produto = Produtos.objects.create(
+            nome='Fonte ATX 500W',
+            preco_custo=Decimal('100.00'),
+            preco_venda=Decimal('180.00'),
+        )
+        self.eq = EquipamentoCliente.objects.create(cliente=self.cliente1, descricao='PC Desktop Gamer')
+
+        tz = timezone.get_current_timezone()
+
+        # Venda em aberto (finalizada=False) - R$ 180.00
+        self.venda_aberta = Venda.objects.create(
+            cliente=self.cliente1,
+            status='ABERTO',
+            finalizada=False,
+            data_venda=timezone.make_aware(datetime(2026, 11, 5, 10, 0), tz),
+        )
+        ItemVenda.objects.create(venda=self.venda_aberta, produto=self.produto, quantidade=Decimal('1.000'))
+
+        # Venda cancelada com finalizada=False (deve ser ocultada por padrão)
+        self.venda_cancelada = Venda.objects.create(
+            cliente=self.cliente1,
+            status='CANCELADO',
+            finalizada=False,
+            data_venda=timezone.make_aware(datetime(2026, 11, 6, 10, 0), tz),
+            valor_total=Decimal('999.00'),
+        )
+
+        # Venda finalizada a prazo com saldo em aberto no financeiro (R$ 360.00)
+        self.venda_aprazo = Venda.objects.create(
+            cliente=self.cliente1,
+            status='ABERTO',
+            data_venda=timezone.make_aware(datetime(2026, 11, 7, 14, 0), tz),
+        )
+        ItemVenda.objects.create(venda=self.venda_aprazo, produto=self.produto, quantidade=Decimal('2.000'))
+        self.venda_aprazo.finalizar_venda(condicao_pagamento='CREDIARIO', numero_parcelas=2, quitada=False)
+
+        # OS em aberto (finalizada=False) - R$ 120.00
+        self.os_aberta = OrdemServico.objects.create(
+            cliente=self.cliente1,
+            equipamento=self.eq,
+            status='EM_ANDAMENTO',
+            finalizada=False,
+            defeito_reclamado='Não liga',
+            laudo_tecnico='Troca de fonte em análise',
+            data_abertura=timezone.make_aware(datetime(2026, 11, 8, 9, 0), tz),
+        )
+        ItemOrdemServico.objects.create(
+            ordem=self.os_aberta,
+            tipo_item='SERVICO',
+            descricao_personalizada='Mão de obra diagnóstico',
+            quantidade=Decimal('1.000'),
+            valor_unitario=Decimal('120.00'),
+        )
+
+        # OS de outro cliente
+        self.os_outro = OrdemServico.objects.create(
+            cliente=self.cliente2,
+            status='ORCAMENTO',
+            finalizada=False,
+            data_abertura=timezone.make_aware(datetime(2026, 11, 8, 9, 0), tz),
+        )
+
+    def test_resumo_cliente_em_aberto_e_somatoria(self):
+        from decimal import Decimal
+
+        url = reverse('admin:cadastro_extratocliente_changelist')
+        res = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'ocultar_cancelados': '1',
+        })
+        self.assertEqual(res.status_code, 200)
+        dados = res.context['dados']
+        self.assertEqual(dados['qtd_vendas'], 1)
+        self.assertEqual(dados['qtd_os'], 1)
+        self.assertEqual(dados['total_vendas'], Decimal('180.00'))
+        self.assertEqual(dados['total_os'], Decimal('120.00'))
+        self.assertEqual(dados['total_geral'], Decimal('300.00'))
+        self.assertEqual(dados['em_aberto_geral'], Decimal('300.00'))
+        self.assertContains(res, f'VND #{self.venda_aberta.id:06d}')
+        self.assertContains(res, f'OS #{self.os_aberta.id:06d}')
+        self.assertNotContains(res, f'VND #{self.venda_cancelada.id:06d}')
+
+    def test_resumo_inclui_pendencia_financeira_e_filtro_data(self):
+        from decimal import Decimal
+
+        url = reverse('admin:cadastro_extratocliente_changelist')
+        res = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos_ou_financeiro',
+            'data_inicio': '2026-11-07',
+            'data_fim': '2026-11-08',
+            'ocultar_cancelados': '1',
+        })
+        self.assertEqual(res.status_code, 200)
+        dados = res.context['dados']
+        # Inclui venda_aprazo (360) + os_aberta (120) = 480 em aberto
+        self.assertEqual(dados['qtd_total'], 2)
+        self.assertEqual(dados['em_aberto_geral'], Decimal('480.00'))
+
+    def test_imprimir_todos_detalhados_com_capa_e_selecao_parcial(self):
+        url = reverse('admin:cadastro_extratocliente_changelist')
+        res = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'ocultar_cancelados': '1',
+            'imprimir_todos': '1',
+        })
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Extrato Consolidado')
+        self.assertContains(res, 'KATO E CIA INFORMATICA')
+        self.assertContains(res, 'FONTE ATX 500W')
+        self.assertContains(res, 'Mão de obra diagnóstico')
+        self.assertContains(res, 'batch-page')
+
+        # Seleção parcial por checkbox: apenas a OS
+        res_sel = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'imprimir_todos': '1',
+            'sel': f'OS-{self.os_aberta.id}',
+        })
+        self.assertEqual(res_sel.status_code, 200)
+        self.assertContains(res_sel, 'Mão de obra diagnóstico')
+        self.assertNotContains(res_sel, 'FONTE ATX 500W')
+
+        # Impressão somente do resumo
+        res_resumo = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'acao': 'imprimir_resumo',
+        })
+        self.assertEqual(res_resumo.status_code, 200)
+        self.assertContains(res_resumo, 'Relação Resumida dos Documentos')
+        self.assertNotContains(res_resumo, 'Mão de obra diagnóstico')
+
+    def test_exportar_csv_e_busca_clientes_e_atalhos(self):
+        url = reverse('admin:cadastro_extratocliente_changelist')
+        res_csv = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'exportar': 'csv',
+        })
+        self.assertEqual(res_csv.status_code, 200)
+        self.assertIn('text/csv', res_csv['Content-Type'])
+        body = res_csv.content.decode('utf-8-sig')
+        self.assertIn('TOTAL GERAL', body)
+        self.assertIn('300,00', body)
+
+        url_busca = reverse('admin:cadastro_extratocliente_buscar_clientes')
+        res_busca = self.client.get(url_busca, {'q': 'Alfa'})
+        self.assertEqual(res_busca.status_code, 200)
+        results = res_busca.json()['results']
+        self.assertTrue(any(r['id'] == self.cliente1.pk for r in results))
+
+        # Verifica atalhos em Pessoas, Venda e OrdemServico
+        res_pessoa = self.client.get(reverse('admin:cadastro_pessoas_change', args=[self.cliente1.pk]))
+        self.assertContains(res_pessoa, 'Resumo / Extrato de Vendas e OS')
+
+        res_vendas = self.client.get(reverse('admin:vendas_venda_changelist'))
+        self.assertContains(res_vendas, 'Resumo / Extrato por Cliente')
+
+        res_os = self.client.get(reverse('admin:ordem_servico_ordemservico_changelist'))
+        self.assertContains(res_os, 'Resumo / Extrato por Cliente')
+
+    def test_ordenacao_crescente_decrescente_tela_impressao_csv(self):
+        url = reverse('admin:cadastro_extratocliente_changelist')
+
+        # Padrão (data desc): OS (dia 08, R$ 120) antes da Venda (dia 05, R$ 180)
+        res_desc = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'ordenar_por': 'data',
+            'direcao': 'desc',
+        })
+        self.assertEqual(res_desc.status_code, 200)
+        chaves_desc = [r['chave'] for r in res_desc.context['dados']['registros']]
+        self.assertEqual(chaves_desc, [f'OS-{self.os_aberta.id}', f'V-{self.venda_aberta.id}'])
+
+        # Data crescente (asc): Venda (dia 05) antes da OS (dia 08)
+        res_asc = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'ordenar_por': 'data',
+            'direcao': 'asc',
+        })
+        self.assertEqual(res_asc.status_code, 200)
+        chaves_asc = [r['chave'] for r in res_asc.context['dados']['registros']]
+        self.assertEqual(chaves_asc, [f'V-{self.venda_aberta.id}', f'OS-{self.os_aberta.id}'])
+
+        # Ordenar por valor_total decrescente: Venda (180) antes da OS (120)
+        res_val_desc = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'ordenar_por': 'valor_total',
+            'direcao': 'desc',
+        })
+        chaves_val = [r['chave'] for r in res_val_desc.context['dados']['registros']]
+        self.assertEqual(chaves_val, [f'V-{self.venda_aberta.id}', f'OS-{self.os_aberta.id}'])
+
+        # Ordenar por valor_total crescente na impressão em lote
+        res_print_asc = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'ordenar_por': 'valor_total',
+            'direcao': 'asc',
+            'imprimir_todos': '1',
+        })
+        self.assertEqual(res_print_asc.status_code, 200)
+        self.assertContains(res_print_asc, 'Valor Total (Crescente)')
+        body_print = res_print_asc.content.decode('utf-8')
+        # Na capa (tabela resumo), a OS (120) aparece antes da Venda (180)
+        self.assertLess(
+            body_print.find(f'OS #{self.os_aberta.id:06d}'),
+            body_print.find(f'VND #{self.venda_aberta.id:06d}'),
+        )
+        # Nas páginas detalhadas seguintes, a OS detalhada também aparece antes da Venda detalhada
+        self.assertLess(body_print.find('Mão de obra diagnóstico'), body_print.rfind('FONTE ATX 500W'))
+
+        # Ordenação aplicada no CSV
+        res_csv_asc = self.client.get(url, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'abertos',
+            'ordenar_por': 'data',
+            'direcao': 'asc',
+            'exportar': 'csv',
+        })
+        csv_text = res_csv_asc.content.decode('utf-8-sig')
+        self.assertLess(csv_text.find(f'VND #{self.venda_aberta.id:06d}'), csv_text.find(f'OS #{self.os_aberta.id:06d}'))
+

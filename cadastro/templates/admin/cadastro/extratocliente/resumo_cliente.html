@@ -1,0 +1,720 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'admin/css/vendor/select2/select2.min.css' %}">
+<link rel="stylesheet" href="{% static 'admin/css/autocomplete.css' %}">
+<style>
+    .ext-wrap {
+        max-width: 1400px;
+        margin: 0 auto;
+    }
+    .ext-filter-card {
+        background: var(--body-bg, #fff);
+        border: 1px solid var(--hairline-color, #cbd5e1);
+        border-radius: 8px;
+        padding: 18px 20px;
+        margin-bottom: 18px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .ext-filter-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+        gap: 14px;
+        align-items: end;
+    }
+    .ext-field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+    }
+    .ext-field.col-span-2 {
+        grid-column: span 2;
+    }
+    @media (max-width: 768px) {
+        .ext-field.col-span-2 {
+            grid-column: span 1;
+        }
+    }
+    .ext-field label {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--body-quiet-color, #475569);
+    }
+    .ext-field input[type="date"],
+    .ext-field select {
+        height: 38px !important;
+        min-height: 38px !important;
+        line-height: 1.4 !important;
+        padding: 6px 10px !important;
+        border: 1px solid var(--border-color, #cbd5e1);
+        border-radius: 5px;
+        background: var(--body-bg, #fff);
+        color: var(--body-fg, #0f172a);
+        box-sizing: border-box;
+        width: 100%;
+    }
+    .select2-container {
+        width: 100% !important;
+    }
+    .select2-container .select2-selection--single,
+    .select2-container--admin-autocomplete .select2-selection--single {
+        height: 38px !important;
+        min-height: 38px !important;
+        border: 1px solid var(--border-color, #cbd5e1) !important;
+        background-color: var(--body-bg, #fff) !important;
+        border-radius: 5px !important;
+    }
+    .select2-container--admin-autocomplete .select2-selection--single .select2-selection__rendered,
+    .select2-container--default .select2-selection--single .select2-selection__rendered {
+        line-height: 36px !important;
+        padding-left: 10px !important;
+        color: var(--body-fg, #0f172a) !important;
+    }
+    .select2-container--admin-autocomplete .select2-selection--single .select2-selection__arrow,
+    .select2-container--default .select2-selection--single .select2-selection__arrow {
+        height: 36px !important;
+    }
+    .select2-container--admin-autocomplete .select2-dropdown,
+    .select2-dropdown {
+        background-color: var(--body-bg, #fff) !important;
+        color: var(--body-fg, #0f172a) !important;
+        border: 1px solid var(--border-color, #cbd5e1) !important;
+    }
+    .select2-container--admin-autocomplete .select2-search--dropdown {
+        background-color: var(--darkened-bg, #f8fafc) !important;
+        padding: 6px !important;
+    }
+    .select2-container--admin-autocomplete .select2-search--dropdown .select2-search__field {
+        background-color: var(--body-bg, #fff) !important;
+        color: var(--body-fg, #0f172a) !important;
+        border: 1px solid var(--border-color, #cbd5e1) !important;
+        padding: 6px 8px !important;
+    }
+    .select2-container--admin-autocomplete .select2-results__option {
+        color: var(--body-fg, #0f172a) !important;
+        background-color: var(--body-bg, #fff);
+        padding: 6px 10px !important;
+    }
+    .select2-container--admin-autocomplete .select2-results__option--highlighted[aria-selected] {
+        background-color: var(--primary, #2563eb) !important;
+        color: var(--primary-fg, #fff) !important;
+    }
+
+    .ext-filter-footer {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-top: 16px;
+        padding-top: 14px;
+        border-top: 1px solid var(--hairline-color, #e2e8f0);
+    }
+    .ext-toggles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 18px;
+        align-items: center;
+    }
+    .ext-check-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+    .ext-btn-group {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        align-items: center;
+    }
+    .ext-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 8px 14px;
+        border-radius: 5px;
+        font-size: 12.5px;
+        font-weight: 700;
+        border: none;
+        cursor: pointer;
+        text-decoration: none;
+        line-height: 1.2;
+    }
+    .ext-btn-primary { background: #0f172a; color: #fff; }
+    .ext-btn-primary:hover { background: #1e293b; color: #fff; }
+    .ext-btn-blue { background: #2563eb; color: #fff; }
+    .ext-btn-blue:hover { background: #1d4ed8; color: #fff; }
+    .ext-btn-green { background: #16a34a; color: #fff; }
+    .ext-btn-green:hover { background: #15803d; color: #fff; }
+    .ext-btn-outline {
+        background: transparent;
+        color: var(--body-fg, #334155);
+        border: 1px solid var(--border-color, #94a3b8);
+    }
+    .ext-btn-outline:hover {
+        background: var(--darkened-bg, #f1f5f9);
+    }
+
+    .ext-kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 14px;
+        margin-bottom: 18px;
+    }
+    .ext-kpi-card {
+        background: var(--body-bg, #fff);
+        border: 1px solid var(--hairline-color, #cbd5e1);
+        border-radius: 8px;
+        padding: 14px 18px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.03);
+    }
+    .ext-kpi-card.highlight-open {
+        border-color: #d97706;
+        border-width: 2px;
+        background: rgba(217, 119, 6, 0.06);
+    }
+    .ext-kpi-label {
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: var(--body-quiet-color, #64748b);
+    }
+    .ext-kpi-value {
+        font-size: 22px;
+        font-weight: 800;
+        color: var(--body-fg, #0f172a);
+        margin-top: 4px;
+    }
+    .ext-kpi-card.highlight-open .ext-kpi-value {
+        color: #d97706;
+    }
+    .ext-kpi-sub {
+        font-size: 12px;
+        color: var(--body-quiet-color, #64748b);
+        margin-top: 4px;
+    }
+
+    .ext-table-card {
+        background: var(--body-bg, #fff);
+        border: 1px solid var(--hairline-color, #cbd5e1);
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .ext-table-header {
+        padding: 12px 18px;
+        background: var(--darkened-bg, #f8fafc);
+        border-bottom: 1px solid var(--hairline-color, #e2e8f0);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .ext-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12.5px;
+    }
+    .ext-table th {
+        background: var(--darkened-bg, #f1f5f9);
+        padding: 9px 10px;
+        text-align: left;
+        font-size: 11px;
+        text-transform: uppercase;
+        border-bottom: 1px solid var(--hairline-color, #cbd5e1);
+    }
+    .ext-table td {
+        padding: 9px 10px;
+        border-bottom: 1px solid var(--hairline-color, #e2e8f0);
+        vertical-align: middle;
+    }
+    .ext-table tr:hover td {
+        background: var(--darkened-bg, rgba(148, 163, 184, 0.08));
+    }
+    .badge-tipo-venda {
+        background: #dbeafe;
+        color: #1e40af;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 700;
+        font-size: 10.5px;
+    }
+    .badge-tipo-os {
+        background: #ede9fe;
+        color: #5b21b6;
+        padding: 2px 7px;
+        border-radius: 4px;
+        font-weight: 700;
+        font-size: 10.5px;
+    }
+    .badge-status-open {
+        background: #fef3c7;
+        color: #92400e;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 700;
+        font-size: 10.5px;
+    }
+    .badge-status-done {
+        background: #dcfce7;
+        color: #166534;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-weight: 700;
+        font-size: 10.5px;
+    }
+    .text-right { text-align: right !important; }
+    .text-center { text-align: center !important; }
+    .quick-dates {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+    }
+    .quick-date-btn {
+        font-size: 11px;
+        padding: 2px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--border-color, #cbd5e1);
+        background: transparent;
+        color: var(--body-fg, #334155);
+        cursor: pointer;
+    }
+    .quick-date-btn:hover {
+        background: var(--darkened-bg, #e2e8f0);
+    }
+    .sort-th-btn {
+        background: transparent;
+        border: none;
+        padding: 0;
+        font: inherit;
+        font-size: inherit;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: inherit;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .sort-th-btn:hover {
+        color: #2563eb;
+        text-decoration: underline;
+    }
+    .sort-th-btn.active {
+        color: #2563eb;
+    }
+</style>
+{% endblock %}
+
+{% block extrahead %}
+{{ block.super }}
+<script src="{% static 'admin/js/vendor/jquery/jquery.min.js' %}"></script>
+<script src="{% static 'admin/js/vendor/select2/select2.full.min.js' %}"></script>
+<script src="{% static 'admin/js/vendor/select2/i18n/pt-BR.js' %}"></script>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Início</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='cadastro' %}">Cadastro</a>
+    &rsaquo; Resumo / Extrato de Cliente (Vendas e OS)
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="ext-wrap">
+    <form method="get" id="ext-filter-form" class="ext-filter-card">
+        <div class="ext-filter-grid">
+            <div class="ext-field col-span-2">
+                <label for="id_filtro_cliente">Cliente:</label>
+                <select name="cliente" id="id_filtro_cliente">
+                    <option value="">--- Todos os Clientes (Últimos registros) ---</option>
+                    {% if dados.cliente %}
+                        <option value="{{ dados.cliente.pk }}" selected>
+                            {{ dados.cliente.razao_nome }}{% if dados.cliente.cnpj_cpf %} ({{ dados.cliente.cnpj_cpf }}){% endif %}
+                        </option>
+                    {% endif %}
+                </select>
+            </div>
+
+            <div class="ext-field">
+                <label for="id_data_inicio">Data Inicial (De):</label>
+                <input type="date" name="data_inicio" id="id_data_inicio" value="{{ data_inicio_str }}">
+                <div class="quick-dates">
+                    <button type="button" class="quick-date-btn" data-preset="hoje">Hoje</button>
+                    <button type="button" class="quick-date-btn" data-preset="7dias">7 dias</button>
+                    <button type="button" class="quick-date-btn" data-preset="mes">Este mês</button>
+                    <button type="button" class="quick-date-btn" data-preset="limpar">Limpar datas</button>
+                </div>
+            </div>
+
+            <div class="ext-field">
+                <label for="id_data_fim">Data Final (Até):</label>
+                <input type="date" name="data_fim" id="id_data_fim" value="{{ data_fim_str }}">
+            </div>
+
+            <div class="ext-field">
+                <label for="id_situacao">Finalizada / Concluída:</label>
+                <select name="situacao" id="id_situacao">
+                    <option value="abertos" {% if situacao == 'abertos' %}selected{% endif %}>⏳ Somente Em Aberto (Finalizada = Não)</option>
+                    <option value="abertos_ou_financeiro" {% if situacao == 'abertos_ou_financeiro' %}selected{% endif %}>💰 Em Aberto + Pendência Financeira</option>
+                    <option value="finalizados" {% if situacao == 'finalizados' %}selected{% endif %}>✅ Somente Finalizadas (Finalizada = Sim)</option>
+                    <option value="todos" {% if situacao == 'todos' %}selected{% endif %}>📋 Todas</option>
+                </select>
+            </div>
+
+            <div class="ext-field">
+                <label for="id_tipo_doc">Tipo de Documento:</label>
+                <select name="tipo_doc" id="id_tipo_doc">
+                    <option value="ambos" {% if tipo_doc == 'ambos' %}selected{% endif %}>Vendas + Ordens de Serviço</option>
+                    <option value="vendas" {% if tipo_doc == 'vendas' %}selected{% endif %}>Somente Vendas</option>
+                    <option value="ordens" {% if tipo_doc == 'ordens' %}selected{% endif %}>Somente Ordens de Serviço</option>
+                </select>
+            </div>
+
+            <div class="ext-field">
+                <label for="id_ordenar_por">Ordenar por:</label>
+                <select name="ordenar_por" id="id_ordenar_por">
+                    {% for key, label in ordenacao_campos %}
+                        <option value="{{ key }}" {% if ordenar_por == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="ext-field">
+                <label for="id_direcao">Ordem:</label>
+                <select name="direcao" id="id_direcao">
+                    <option value="desc" {% if direcao == 'desc' %}selected{% endif %}>↓ Decrescente</option>
+                    <option value="asc" {% if direcao == 'asc' %}selected{% endif %}>↑ Crescente</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="ext-filter-footer">
+            <div class="ext-toggles">
+                <label class="ext-check-label">
+                    <input type="hidden" name="ocultar_cancelados" value="0">
+                    <input type="checkbox" name="ocultar_cancelados" value="1" {% if ocultar_cancelados %}checked{% endif %}>
+                    Ocultar Cancelados
+                </label>
+
+                <label class="ext-check-label" title="Quando marcado, ao clicar em Aplicar / Executar já abre a impressão detalhada de todas as Vendas e OS.">
+                    <input type="checkbox" name="imprimir_todos" value="1" id="chk-imprimir-todos" {% if imprimir_todos %}checked{% endif %}>
+                    🖨️ Imprimir Todos Detalhados (Capa + Modelos Prontos)
+                </label>
+            </div>
+
+            <div class="ext-btn-group">
+                <a href="{% url 'admin:cadastro_extratocliente_changelist' %}" class="ext-btn ext-btn-outline">Limpar Filtros</a>
+                <button type="submit" class="ext-btn ext-btn-primary" id="btn-filtrar">🔍 Filtrar</button>
+                <button type="button" class="ext-btn ext-btn-blue" id="btn-imprimir-resumo">🖨️ Imprimir Resumo</button>
+                <button type="button" class="ext-btn ext-btn-green" id="btn-imprimir-detalhado">🖨️ Imprimir Todos Detalhados</button>
+                <button type="button" class="ext-btn ext-btn-outline" id="btn-exportar-csv">📥 Exportar CSV</button>
+            </div>
+        </div>
+    </form>
+
+    {% if not dados.cliente %}
+    <div style="background: rgba(37, 99, 235, 0.08); border: 1px solid #93c5fd; color: var(--body-fg, #1e3a8a); padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; font-size: 12.5px;">
+        💡 <strong>Dica:</strong> Nenhum cliente específico selecionado — exibindo até os últimos 250 registros de cada tipo conforme os filtros acima. Selecione um <strong>Cliente</strong> no campo de busca para consultar o histórico completo e gerar o extrato para impressão.
+    </div>
+    {% endif %}
+
+    <!-- CARDS DE RESUMO E SOMATÓRIA -->
+    <div class="ext-kpi-grid">
+        <div class="ext-kpi-card">
+            <span class="ext-kpi-label">Vendas Filtradas</span>
+            <span class="ext-kpi-value">R$ {{ dados.total_vendas|floatformat:2 }}</span>
+            <span class="ext-kpi-sub">{{ dados.qtd_vendas }} venda(s) | Em aberto: R$ {{ dados.em_aberto_vendas|floatformat:2 }}</span>
+        </div>
+
+        <div class="ext-kpi-card">
+            <span class="ext-kpi-label">Ordens de Serviço Filtradas</span>
+            <span class="ext-kpi-value">R$ {{ dados.total_os|floatformat:2 }}</span>
+            <span class="ext-kpi-sub">{{ dados.qtd_os }} ordem(ns) | Em aberto: R$ {{ dados.em_aberto_os|floatformat:2 }}</span>
+        </div>
+
+        <div class="ext-kpi-card">
+            <span class="ext-kpi-label">Somatória Total Geral (Vendas + OS)</span>
+            <span class="ext-kpi-value">R$ {{ dados.total_geral|floatformat:2 }}</span>
+            <span class="ext-kpi-sub">{{ dados.qtd_total }} documento(s) encontrado(s)</span>
+        </div>
+
+        <div class="ext-kpi-card highlight-open">
+            <span class="ext-kpi-label">⚠️ Valor Total em Aberto</span>
+            <span class="ext-kpi-value">R$ {{ dados.em_aberto_geral|floatformat:2 }}</span>
+            <span class="ext-kpi-sub">Soma de documentos abertos + parcelas pendentes</span>
+        </div>
+    </div>
+
+    <!-- TABELA DE RESUMO SIMPLIFICADO -->
+    <div class="ext-table-card">
+        <div class="ext-table-header">
+            <div>
+                <strong>Resumo Simplificado — Vendas e Ordens de Serviço</strong>
+                {% if dados.cliente %}
+                    <span style="margin-left:8px; font-size:12px; color:#64748b;">
+                        Cliente: <strong>{{ dados.cliente.razao_nome }}</strong>
+                        {% if dados.cliente.cnpj_cpf %} ({{ dados.cliente.cnpj_cpf }}){% endif %}
+                    </span>
+                {% endif %}
+            </div>
+            <div style="font-size:12px; color:#64748b;">
+                <span id="sel-counter">0</span> item(ns) marcado(s) — se nenhum for marcado, imprime todos os {{ dados.qtd_total }} exibidos.
+            </div>
+        </div>
+
+        <div style="overflow-x:auto;">
+            <table class="ext-table">
+                <thead>
+                    <tr>
+                        <th style="width:32px;" class="text-center">
+                            <input type="checkbox" id="chk-select-all" title="Selecionar todos">
+                        </th>
+                        <th>
+                            <button type="button" class="sort-th-btn {% if ordenar_por == 'tipo' %}active{% endif %}" data-sort="tipo">
+                                Tipo {% if ordenar_por == 'tipo' %}{% if direcao == 'asc' %}▲{% else %}▼{% endif %}{% else %}⇅{% endif %}
+                            </button>
+                        </th>
+                        <th>
+                            <button type="button" class="sort-th-btn {% if ordenar_por == 'id' %}active{% endif %}" data-sort="id">
+                                Documento {% if ordenar_por == 'id' %}{% if direcao == 'asc' %}▲{% else %}▼{% endif %}{% else %}⇅{% endif %}
+                            </button>
+                        </th>
+                        <th>
+                            <button type="button" class="sort-th-btn {% if ordenar_por == 'data' %}active{% endif %}" data-sort="data">
+                                Data {% if ordenar_por == 'data' %}{% if direcao == 'asc' %}▲{% else %}▼{% endif %}{% else %}⇅{% endif %}
+                            </button>
+                        </th>
+                        {% if not dados.cliente %}
+                        <th>
+                            <button type="button" class="sort-th-btn {% if ordenar_por == 'cliente' %}active{% endif %}" data-sort="cliente">
+                                Cliente {% if ordenar_por == 'cliente' %}{% if direcao == 'asc' %}▲{% else %}▼{% endif %}{% else %}⇅{% endif %}
+                            </button>
+                        </th>
+                        {% endif %}
+                        <th>Vendedor / Técnico</th>
+                        <th>Resumo / Equipamento / Itens</th>
+                        <th>
+                            <button type="button" class="sort-th-btn {% if ordenar_por == 'status' %}active{% endif %}" data-sort="status">
+                                Status {% if ordenar_por == 'status' %}{% if direcao == 'asc' %}▲{% else %}▼{% endif %}{% else %}⇅{% endif %}
+                            </button>
+                        </th>
+                        <th class="text-center">Finalizada</th>
+                        <th>Financeiro</th>
+                        <th class="text-right">
+                            <button type="button" class="sort-th-btn {% if ordenar_por == 'valor_total' %}active{% endif %}" data-sort="valor_total">
+                                Valor Total {% if ordenar_por == 'valor_total' %}{% if direcao == 'asc' %}▲{% else %}▼{% endif %}{% else %}⇅{% endif %}
+                            </button>
+                        </th>
+                        <th class="text-right">
+                            <button type="button" class="sort-th-btn {% if ordenar_por == 'valor_em_aberto' %}active{% endif %}" data-sort="valor_em_aberto">
+                                Valor em Aberto {% if ordenar_por == 'valor_em_aberto' %}{% if direcao == 'asc' %}▲{% else %}▼{% endif %}{% else %}⇅{% endif %}
+                            </button>
+                        </th>
+                        <th class="text-center">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in dados.registros %}
+                    <tr>
+                        <td class="text-center">
+                            <input type="checkbox" class="chk-doc-item" value="{{ r.chave }}">
+                        </td>
+                        <td>
+                            {% if r.tipo == 'VENDA' %}
+                                <span class="badge-tipo-venda">VENDA</span>
+                            {% else %}
+                                <span class="badge-tipo-os">OS</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{{ r.url_admin }}" style="font-weight:700;">{{ r.numero }}</a>
+                        </td>
+                        <td style="white-space:nowrap;">{{ r.data|date:"d/m/Y H:i" }}</td>
+                        {% if not dados.cliente %}
+                        <td><strong>{{ r.cliente_nome }}</strong></td>
+                        {% endif %}
+                        <td>{{ r.responsavel }}</td>
+                        <td>{{ r.resumo }}</td>
+                        <td>{{ r.status_display }}</td>
+                        <td class="text-center">
+                            {% if r.finalizada %}
+                                <span class="badge-status-done">Sim</span>
+                            {% else %}
+                                <span class="badge-status-open">Não</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ r.status_financeiro }}</td>
+                        <td class="text-right"><strong>R$ {{ r.valor_total|floatformat:2 }}</strong></td>
+                        <td class="text-right">
+                            <strong style="{% if r.valor_em_aberto > 0 %}color:#d97706;{% else %}color:#16a34a;{% endif %}">
+                                R$ {{ r.valor_em_aberto|floatformat:2 }}
+                            </strong>
+                        </td>
+                        <td class="text-center" style="white-space:nowrap;">
+                            <a href="{{ r.url_imprimir }}" target="_blank" class="ext-btn ext-btn-blue" style="padding:4px 8px; font-size:11px;">
+                                🖨️ Imprimir
+                            </a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="13" class="text-center" style="padding:24px; color:#64748b;">
+                            Nenhuma Venda ou Ordem de Serviço encontrada com os filtros selecionados.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                {% if dados.registros %}
+                <tfoot>
+                    <tr style="background: var(--darkened-bg, #f8fafc); font-weight:800;">
+                        <td colspan="{% if not dados.cliente %}10{% else %}9{% endif %}" class="text-right">
+                            TOTAIS CONSOLIDADOS ({{ dados.qtd_total }} documento(s)):
+                        </td>
+                        <td class="text-right">R$ {{ dados.total_geral|floatformat:2 }}</td>
+                        <td class="text-right" style="color:#d97706;">R$ {{ dados.em_aberto_geral|floatformat:2 }}</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+                {% endif %}
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    var $ = window.jQuery || (window.django && window.django.jQuery);
+    if (!$) return;
+
+    $(document).ready(function() {
+        var $clienteSelect = $('#id_filtro_cliente');
+        $clienteSelect.select2({
+            theme: 'admin-autocomplete',
+            language: 'pt-BR',
+            allowClear: true,
+            placeholder: 'Digite nome, fantasia ou CPF/CNPJ do cliente...',
+            ajax: {
+                url: '{% url "admin:cadastro_extratocliente_buscar_clientes" %}',
+                dataType: 'json',
+                delay: 250,
+                data: function(params) {
+                    return { q: params.term || '' };
+                },
+                processResults: function(data) {
+                    return { results: data.results || [] };
+                },
+                cache: true
+            },
+            minimumInputLength: 0
+        });
+
+        function formatISO(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+
+        $('.quick-date-btn').on('click', function() {
+            var preset = $(this).data('preset');
+            var hoje = new Date();
+            if (preset === 'hoje') {
+                $('#id_data_inicio').val(formatISO(hoje));
+                $('#id_data_fim').val(formatISO(hoje));
+            } else if (preset === '7dias') {
+                var ini = new Date(hoje.getTime());
+                ini.setDate(ini.getDate() - 6);
+                $('#id_data_inicio').val(formatISO(ini));
+                $('#id_data_fim').val(formatISO(hoje));
+            } else if (preset === 'mes') {
+                var prim = new Date(hoje.getFullYear(), hoje.getMonth(), 1);
+                var ult = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 0);
+                $('#id_data_inicio').val(formatISO(prim));
+                $('#id_data_fim').val(formatISO(ult));
+            } else if (preset === 'limpar') {
+                $('#id_data_inicio').val('');
+                $('#id_data_fim').val('');
+            }
+        });
+
+        function updateCounter() {
+            $('#sel-counter').text($('.chk-doc-item:checked').length);
+        }
+
+        $('#chk-select-all').on('change', function() {
+            $('.chk-doc-item').prop('checked', $(this).is(':checked'));
+            updateCounter();
+        });
+
+        $(document).on('change', '.chk-doc-item', updateCounter);
+
+        function buildQueryUrl(extraParams) {
+            var form = document.getElementById('ext-filter-form');
+            var params = new URLSearchParams();
+
+            var clienteVal = $('#id_filtro_cliente').val();
+            if (clienteVal) params.set('cliente', clienteVal);
+            if ($('#id_data_inicio').val()) params.set('data_inicio', $('#id_data_inicio').val());
+            if ($('#id_data_fim').val()) params.set('data_fim', $('#id_data_fim').val());
+            params.set('situacao', $('#id_situacao').val());
+            params.set('tipo_doc', $('#id_tipo_doc').val());
+            params.set('ordenar_por', $('#id_ordenar_por').val() || 'data');
+            params.set('direcao', $('#id_direcao').val() || 'desc');
+            params.set('ocultar_cancelados', $('input[type="checkbox"][name="ocultar_cancelados"]').is(':checked') ? '1' : '0');
+
+            $('.chk-doc-item:checked').each(function() {
+                params.append('sel', $(this).val());
+            });
+
+            if (extraParams) {
+                Object.keys(extraParams).forEach(function(k) {
+                    params.set(k, extraParams[k]);
+                });
+            }
+            return window.location.pathname + '?' + params.toString();
+        }
+
+        $('#btn-imprimir-resumo').on('click', function() {
+            window.open(buildQueryUrl({ acao: 'imprimir_resumo' }), '_blank');
+        });
+
+        $('#btn-imprimir-detalhado').on('click', function() {
+            window.open(buildQueryUrl({ imprimir_todos: '1' }), '_blank');
+        });
+
+        $('#btn-exportar-csv').on('click', function() {
+            window.location.href = buildQueryUrl({ exportar: 'csv' });
+        });
+
+        $('.sort-th-btn').on('click', function() {
+            var col = $(this).data('sort');
+            var atualCol = $('#id_ordenar_por').val() || 'data';
+            var atualDir = $('#id_direcao').val() || 'desc';
+            var novaDir = 'asc';
+            if (col === atualCol) {
+                novaDir = (atualDir === 'asc') ? 'desc' : 'asc';
+            } else if (col === 'data' || col === 'id' || col === 'valor_total' || col === 'valor_em_aberto') {
+                novaDir = 'desc';
+            }
+            window.location.href = buildQueryUrl({ ordenar_por: col, direcao: novaDir });
+        });
+
+        $('#id_ordenar_por, #id_direcao').on('change', function() {
+            window.location.href = buildQueryUrl();
+        });
+
+        $('#ext-filter-form').on('submit', function(e) {
+            if ($('#chk-imprimir-todos').is(':checked')) {
+                e.preventDefault();
+                window.open(buildQueryUrl({ imprimir_todos: '1' }), '_blank');
+            }
+        });
+    });
+})();
+</script>
+{% endblock %}

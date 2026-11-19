@@ -1,0 +1,66 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <title>Impressão OS #{{ ordem.id|stringformat:"06d" }} - {{ cabecalho.titulo|default:"Sistema" }}</title>
+    {% include "admin/cadastro/includes/doc_print_styles.html" %}
+</head>
+<body class="mode-1via">
+
+    <!-- BARRA SUPERIOR DE OPÇÕES (NÃO SAI NA IMPRESSÃO) -->
+    <div class="print-toolbar">
+        <div class="toolbar-left">
+            <span class="toolbar-title">🖨️ Impressão da OS #{{ ordem.id|stringformat:"06d" }}</span>
+            <div class="mode-selector">
+                <button type="button" class="mode-btn active" data-mode="mode-1via">📄 A4 (1 Via)</button>
+                <button type="button" class="mode-btn" data-mode="mode-2vias">✂️ A4 (2 Vias na mesma folha)</button>
+                <button type="button" class="mode-btn" data-mode="mode-80mm">🧾 Cupom 80mm</button>
+            </div>
+        </div>
+        <div class="toolbar-actions">
+            <a href="{% url 'admin:ordem_servico_ordemservico_change' ordem.pk %}" class="btn-back">← Voltar para a OS</a>
+            <button type="button" class="btn-print" onclick="window.print()">🖨️ Imprimir Agora</button>
+        </div>
+    </div>
+
+    <div class="page-sheet">
+        {% for via_num in vias_range %}
+            {% if via_num == 2 %}
+            <div class="cut-line">
+                <span>✂️ Destaque aqui — 2ª Via (Comprovante do Cliente)</span>
+            </div>
+            {% endif %}
+
+            {% if via_num == 2 %}
+                {% include "admin/ordem_servico/ordemservico/_os_via.html" with via_class="via-Segunda" %}
+            {% else %}
+                {% include "admin/ordem_servico/ordemservico/_os_via.html" with via_class="" %}
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <script>
+    (function() {
+        var buttons = document.querySelectorAll('.mode-btn');
+        buttons.forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                buttons.forEach(function(b) { b.classList.remove('active'); });
+                btn.classList.add('active');
+                document.body.className = btn.getAttribute('data-mode');
+            });
+        });
+
+        var params = new URLSearchParams(window.location.search);
+        if (params.get('modo') === '2vias') {
+            document.querySelector('[data-mode="mode-2vias"]').click();
+        } else if (params.get('modo') === '80mm') {
+            document.querySelector('[data-mode="mode-80mm"]').click();
+        }
+        if (params.get('auto_print') === '1') {
+            setTimeout(function() { window.print(); }, 300);
+        }
+    })();
+    </script>
+</body>
+</html>

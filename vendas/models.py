@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import timedelta
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 
@@ -125,11 +126,29 @@ class Venda(Base):
         return 'QUITADO' if all(t.status == 'PAGO' for t in tits) else 'EM ABERTO'
 
     # --- Métodos de Geração e Estorno Financeiro ---
-    def gerar_financeiro(self, usuario=None, quitar_se_avista=True):
+    def _atualizar_datas_compra_cliente(self):
+        if not self.cliente_id or not self.cliente:
+            return
+        if self.cliente.razao_nome == 'CONSUMIDOR FINAL':
+            return
+        dt_compra = self.data_venda.date() if self.data_venda else timezone.localdate()
+        campos_cliente = []
+        if not self.cliente.primeira_compra or dt_compra < self.cliente.primeira_compra:
+            self.cliente.primeira_compra = dt_compra
+            campos_cliente.append('primeira_compra')
+        if not self.cliente.ultima_compra or dt_compra >= self.cliente.ultima_compra:
+            self.cliente.ultima_compra = dt_compra
+            campos_cliente.append('ultima_compra')
+        if campos_cliente:
+            self.cliente.save(update_fields=campos_cliente)
+
+    def gerar_financeiro(self, usuario=None, quitar_se_avista=True, quitada=None):
         """
         Gera os títulos a receber no app financeiro com base nas condições de parcelamento.
-        Se for à vista, cria a BaixaTitulo imediata no caixa/conta selecionada.
-        Trava a venda como finalizada.
+        - Se `quitada=True`: quita automaticamente o(s) título(s) gerado(s) via BaixaTitulo.
+        - Se `quitada=False`: mantém todos os títulos gerados como ABERTO no Contas a Receber.
+        - Se `quitada=None`: quita automaticamente caso seja à vista (DINHEIRO/PIX/CARTAO_DEBITO em 1x) e `quitar_se_avista=True`.
+        Trava a venda como finalizada e atualiza primeira/última compra do cliente.
         """
         from financeiro.models import TituloFinanceiro, BaixaTitulo, CategoriaFinanceira, ContaBancaria
         from cadastro.models import Pessoas
@@ -143,24 +162,53 @@ class Venda(Base):
             self.status = 'FINALIZADO'
             self.data_finalizacao = timezone.now()
             self.save(update_fields=['finalizada', 'status', 'data_finalizacao', 'subtotal', 'valor_total'])
+            self._atualizar_datas_compra_cliente()
             return []
+
+        n = max(1, int(self.numero_parcelas or 1))
+        intervalo = max(0, int(self.intervalo_dias if self.intervalo_dias is not None else 30))
+        dt_venc = self.data_primeiro_vencimento or timezone.localdate()
+
+        if quitada is not None:
+            deve_quitar = bool(quitada)
+        else:
+            is_avista = self.condicao_pagamento in ('DINHEIRO', 'PIX', 'CARTAO_DEBITO') and n == 1
+            deve_quitar = is_avista and quitar_se_avista
+
+        cliente = self.cliente
+        if not cliente:
+            if quitada is False:
+                raise ValidationError('Vendas a prazo (Em Aberto no Contas a Receber) exigem a seleção de um Cliente.')
+            cliente = Pessoas.objects.filter(id=0).first()
+            if not cliente:
+                cliente, _ = Pessoas.objects.get_or_create(
+                    razao_nome='CONSUMIDOR FINAL',
+                    defaults={'juridica_fisica': 1, 'tipo_pessoa': 0},
+                )
 
         categoria, _ = CategoriaFinanceira.objects.get_or_create(
             nome='VENDAS DE MERCADORIAS',
             defaults={'tipo': 'RECEITA'}
         )
 
-        cliente = self.cliente
-        if not cliente:
-            cliente = Pessoas.objects.filter(id=0).first() or Pessoas.objects.first()
-
-        n = self.numero_parcelas or 1
-        intervalo = self.intervalo_dias or 30
-        dt_venc = self.data_primeiro_vencimento or timezone.localdate()
         valores = dividir_valor(total, n)
 
-        is_avista = self.condicao_pagamento in ('DINHEIRO', 'PIX', 'CARTAO_DEBITO') and n == 1
-        conta = self.conta_destino or ContaBancaria.objects.filter(tipo_conta='CAIXA_FISICO').first() or ContaBancaria.objects.first()
+        conta = (
+            self.conta_destino
+            or ContaBancaria.objects.filter(tipo_conta='CAIXA_FISICO', ativo=True).first()
+            or ContaBancaria.objects.filter(ativo=True).first()
+            or ContaBancaria.objects.first()
+        )
+        if deve_quitar and not conta:
+            conta, _ = ContaBancaria.objects.get_or_create(
+                descricao='CAIXA GERAL',
+                defaults={'tipo_conta': 'CAIXA_FISICO', 'saldo_inicial': Decimal('0.00'), 'ativo': True},
+            )
+
+        forma_baixa_map = {
+            'CREDIARIO': 'PROMISSORIA',
+        }
+        forma_baixa = forma_baixa_map.get(self.condicao_pagamento, self.condicao_pagamento or 'DINHEIRO')
 
         titulos_gerados = []
         with transaction.atomic():
@@ -174,7 +222,7 @@ class Venda(Base):
                     categoria=categoria,
                     origem='VENDA',
                     venda=self,
-                    numero_documento=f"VND-{self.id:06d}",
+                    numero_documento=self.numero_nf or f"VND-{self.id:06d}",
                     parcela_numero=i + 1,
                     parcela_total=n,
                     descricao=f"Venda #{self.id:06d} - {cliente.razao_nome}",
@@ -187,15 +235,15 @@ class Venda(Base):
                     usuario=usuario or self.usuario,
                 )
 
-                if is_avista and quitar_se_avista and conta:
+                if deve_quitar and conta:
                     BaixaTitulo.objects.create(
                         titulo=tit,
                         conta_bancaria=conta,
                         data_pagamento=venc,
                         valor_pago=val,
-                        forma_pagamento=self.condicao_pagamento,
+                        forma_pagamento=forma_baixa,
                         identificador_transacao=f"AUTO-VND-{self.id}",
-                        observacoes=f"Quitação automática no fechamento da Venda #{self.id}",
+                        observacoes=f"Quitação registrada no fechamento da Venda #{self.id}",
                         usuario=usuario or self.usuario,
                     )
                     tit.refresh_from_db()
@@ -205,9 +253,70 @@ class Venda(Base):
             self.finalizada = True
             self.status = 'FINALIZADO'
             self.data_finalizacao = timezone.now()
-            self.save(update_fields=['finalizada', 'status', 'data_finalizacao', 'subtotal', 'valor_total'])
+            if usuario:
+                self.usuario_atualizou = usuario
+            self.save(update_fields=[
+                'finalizada', 'status', 'data_finalizacao',
+                'subtotal', 'valor_total', 'usuario_atualizou',
+            ])
+            self._atualizar_datas_compra_cliente()
 
         return titulos_gerados
+
+    def finalizar_venda(
+        self,
+        *,
+        condicao_pagamento=None,
+        numero_parcelas=None,
+        intervalo_dias=None,
+        data_primeiro_vencimento=None,
+        conta_destino=None,
+        desconto=None,
+        quitada=None,
+        numero_nf=None,
+        numero_cupom_fiscal=None,
+        usuario=None,
+    ):
+        """
+        Atualiza os parâmetros financeiros informados no momento do fechamento,
+        recalcula o valor total e gera os títulos no Contas a Receber.
+        """
+        if quitada is False and not self.cliente_id:
+            raise ValidationError('Vendas a prazo (Em Aberto no Contas a Receber) exigem a seleção de um Cliente.')
+
+        campos_atualizados = []
+        if condicao_pagamento is not None:
+            self.condicao_pagamento = condicao_pagamento
+            campos_atualizados.append('condicao_pagamento')
+        if numero_parcelas is not None:
+            self.numero_parcelas = max(1, int(numero_parcelas))
+            campos_atualizados.append('numero_parcelas')
+        if intervalo_dias is not None:
+            self.intervalo_dias = max(0, int(intervalo_dias))
+            campos_atualizados.append('intervalo_dias')
+        if data_primeiro_vencimento is not None:
+            self.data_primeiro_vencimento = data_primeiro_vencimento
+            campos_atualizados.append('data_primeiro_vencimento')
+        if conta_destino is not None:
+            self.conta_destino = conta_destino
+            campos_atualizados.append('conta_destino')
+        if desconto is not None:
+            self.desconto = Decimal(str(desconto))
+            campos_atualizados.append('desconto')
+        if numero_nf is not None:
+            self.numero_nf = numero_nf or None
+            campos_atualizados.append('numero_nf')
+        if numero_cupom_fiscal is not None:
+            self.numero_cupom_fiscal = numero_cupom_fiscal or None
+            campos_atualizados.append('numero_cupom_fiscal')
+        if usuario:
+            self.usuario_atualizou = usuario
+            campos_atualizados.append('usuario_atualizou')
+
+        if campos_atualizados and self.pk:
+            self.save(update_fields=campos_atualizados)
+
+        return self.gerar_financeiro(usuario=usuario, quitada=quitada)
 
     def estornar_financeiro(self, usuario=None):
         """Estorna as parcelas e baixas geradas por esta venda e a reabre."""
@@ -247,6 +356,9 @@ class ItemVenda(Base):
 
     def save(self, *args, **kwargs):
         qtd = self.quantidade if self.quantidade is not None else Decimal('1.000')
+        if (self.valor_unitario is None or self.valor_unitario == Decimal('0.00')) and self.produto_id and self.produto:
+            if self.produto.preco_venda and self.produto.preco_venda > Decimal('0.00'):
+                self.valor_unitario = self.produto.preco_venda
         unit = self.valor_unitario if self.valor_unitario is not None else Decimal('0.00')
         desc = self.desconto_unitario or Decimal('0.00')
         self.valor_total = (qtd * (unit - desc)).quantize(Decimal('0.01'))

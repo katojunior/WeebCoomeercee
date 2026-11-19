@@ -1,0 +1,234 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <title>
+        {% if modo_detalhado %}Impressão Consolidada + Detalhada{% else %}Resumo Consolidado{% endif %}
+        {% if dados.cliente %} - {{ dados.cliente.razao_nome }}{% endif %}
+    </title>
+    {% include "admin/cadastro/includes/doc_print_styles.html" %}
+</head>
+<body class="mode-1via">
+
+    <div class="print-toolbar">
+        <div class="toolbar-left">
+            <span class="toolbar-title">
+                {% if modo_detalhado %}
+                    🖨️ Impressão em Lote (Capa Resumo + {{ dados.qtd_total }} Documento(s) Detalhado(s))
+                {% else %}
+                    🖨️ Resumo Consolidado ({{ dados.qtd_total }} Documento(s))
+                {% endif %}
+            </span>
+        </div>
+        <div class="toolbar-actions">
+            <a href="{{ url_voltar }}" class="btn-back">← Voltar para a Consulta</a>
+            <button type="button" class="btn-print" onclick="window.print()">🖨️ Imprimir Agora</button>
+        </div>
+    </div>
+
+    <!-- PÁGINA 1: CAPA / RESUMO CONSOLIDADO -->
+    <div class="page-sheet {% if modo_detalhado and dados.registros %}batch-page{% endif %}">
+        <div class="via-wrapper">
+            <!-- Cabeçalho da Empresa -->
+            <div class="doc-header">
+                <div class="company-brand">
+                    {% if cabecalho.logo_url %}
+                        <img src="{{ cabecalho.logo_url }}" alt="Logo" class="company-logo">
+                    {% else %}
+                        <div class="company-logo-placeholder">
+                            {{ cabecalho.titulo|slice:":2"|default:"EMP" }}
+                        </div>
+                    {% endif %}
+                    <div class="company-info">
+                        <h1 class="company-title">{{ cabecalho.titulo|default:"EMPRESA NÃO CADASTRADA" }}</h1>
+                        {% if cabecalho.subtitulo %}
+                            <div class="company-subtitle">{{ cabecalho.subtitulo }}</div>
+                        {% endif %}
+                        {% if cabecalho.razao_social and cabecalho.razao_social != cabecalho.titulo %}
+                            <div class="company-detail"><strong>Razão Social:</strong> {{ cabecalho.razao_social }}</div>
+                        {% endif %}
+                        {% if cabecalho.documento_formatado %}
+                            <div class="company-detail">{{ cabecalho.documento_formatado }}</div>
+                        {% endif %}
+                        {% if cabecalho.endereco_completo %}
+                            <div class="company-detail">{{ cabecalho.endereco_completo }}</div>
+                        {% endif %}
+                        {% if cabecalho.contatos_formatados %}
+                            <div class="company-contacts">{{ cabecalho.contatos_formatados }}</div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="doc-box">
+                    <div class="doc-type">Extrato Consolidado</div>
+                    <div class="doc-number" style="font-size:15px;">Vendas e Ordens de Serviço</div>
+                    <div class="doc-meta"><strong>Emitido em:</strong> {% now "d/m/Y H:i" %}</div>
+                    <div class="doc-meta"><strong>Situação:</strong> {{ situacao_label }}</div>
+                    <div class="doc-meta"><strong>Ordem:</strong> {{ dados.ordenar_por_label }} ({{ dados.direcao_label }})</div>
+                    {% if dados.data_inicio or dados.data_fim %}
+                        <div class="doc-meta">
+                            <strong>Período:</strong>
+                            {{ dados.data_inicio|date:"d/m/Y"|default:"Início" }} até {{ dados.data_fim|date:"d/m/Y"|default:"Hoje" }}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Dados do Cliente (quando selecionado) -->
+            {% if dados.cliente %}
+            <div class="section-box">
+                <div class="section-title">
+                    <span>Dados do Cliente</span>
+                    <span>Código #{{ dados.cliente.id }}</span>
+                </div>
+                <div class="info-grid">
+                    <div class="info-cell span-2">
+                        <span class="info-label">Cliente / Razão Social</span>
+                        <span class="info-val">{{ dados.cliente.razao_nome }}</span>
+                    </div>
+                    <div class="info-cell">
+                        <span class="info-label">CNPJ / CPF</span>
+                        <span class="info-val">{{ dados.cliente.cnpj_cpf|default:"—" }}</span>
+                    </div>
+                    <div class="info-cell">
+                        <span class="info-label">Telefone / Celular</span>
+                        <span class="info-val">{{ dados.cliente.celular|default:dados.cliente.telefone|default:"—" }}</span>
+                    </div>
+                    <div class="info-cell span-2">
+                        <span class="info-label">Endereço</span>
+                        <span class="info-val">
+                            {% if dados.cliente.endereco %}
+                                {{ dados.cliente.endereco }}{% if dados.cliente.numero %}, {{ dados.cliente.numero }}{% endif %}{% if dados.cliente.bairro %} - {{ dados.cliente.bairro }}{% endif %}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="info-cell span-2">
+                        <span class="info-label">Cidade / UF - CEP</span>
+                        <span class="info-val">
+                            {% if dados.cliente.codigo_cidade %}
+                                {{ dados.cliente.codigo_cidade }}{% if dados.cliente.cep %} ({{ dados.cliente.cep }}){% endif %}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Cards Totalizadores -->
+            <div class="cover-cards">
+                <div class="cover-card">
+                    <span class="lbl">Vendas ({{ dados.qtd_vendas }})</span>
+                    <span class="val">R$ {{ dados.total_vendas|floatformat:2 }}</span>
+                    <span class="sub">Em aberto: R$ {{ dados.em_aberto_vendas|floatformat:2 }}</span>
+                </div>
+                <div class="cover-card">
+                    <span class="lbl">Ordens de Serviço ({{ dados.qtd_os }})</span>
+                    <span class="val">R$ {{ dados.total_os|floatformat:2 }}</span>
+                    <span class="sub">Em aberto: R$ {{ dados.em_aberto_os|floatformat:2 }}</span>
+                </div>
+                <div class="cover-card">
+                    <span class="lbl">Total Geral ({{ dados.qtd_total }})</span>
+                    <span class="val">R$ {{ dados.total_geral|floatformat:2 }}</span>
+                    <span class="sub">Vendas + Ordens de Serviço</span>
+                </div>
+                <div class="cover-card" style="border: 1.5px solid #92400e; background: #fffbeb;">
+                    <span class="lbl" style="color:#92400e;">Total em Aberto</span>
+                    <span class="val" style="color:#92400e;">R$ {{ dados.em_aberto_geral|floatformat:2 }}</span>
+                    <span class="sub">Saldo total pendente</span>
+                </div>
+            </div>
+
+            <!-- Tabela Resumo -->
+            <div class="section-box">
+                <div class="section-title">
+                    <span>Relação Resumida dos Documentos</span>
+                    <span>{{ dados.qtd_total }} registro(s)</span>
+                </div>
+                <table class="items-table">
+                    <thead>
+                        <tr>
+                            <th>Tipo</th>
+                            <th>Número</th>
+                            <th>Data</th>
+                            {% if not dados.cliente %}<th>Cliente</th>{% endif %}
+                            <th>Resumo / Equipamento / Itens</th>
+                            <th>Status</th>
+                            <th class="text-right">Valor Total</th>
+                            <th class="text-right">Em Aberto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in dados.registros %}
+                        <tr>
+                            <td><strong>{{ r.tipo }}</strong></td>
+                            <td><strong>{{ r.numero }}</strong></td>
+                            <td style="white-space:nowrap;">{{ r.data|date:"d/m/Y" }}</td>
+                            {% if not dados.cliente %}<td>{{ r.cliente_nome }}</td>{% endif %}
+                            <td>{{ r.resumo }}</td>
+                            <td>{{ r.status_display }}</td>
+                            <td class="text-right">R$ {{ r.valor_total|floatformat:2 }}</td>
+                            <td class="text-right"><strong>R$ {{ r.valor_em_aberto|floatformat:2 }}</strong></td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="8" class="text-center" style="padding:12px; color:#64748b;">Nenhum documento encontrado para o filtro informado.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    {% if dados.registros %}
+                    <tfoot>
+                        <tr style="background:#f1f5f9; font-weight:800;">
+                            <td colspan="{% if not dados.cliente %}6{% else %}5{% endif %}" class="text-right">SOMATÓRIA TOTAL:</td>
+                            <td class="text-right">R$ {{ dados.total_geral|floatformat:2 }}</td>
+                            <td class="text-right">R$ {{ dados.em_aberto_geral|floatformat:2 }}</td>
+                        </tr>
+                    </tfoot>
+                    {% endif %}
+                </table>
+            </div>
+
+            {% if cabecalho.chave_pix %}
+            <div class="footer-notes">
+                <strong>Chave PIX para Pagamento ({{ cabecalho.titulo }}):</strong> {{ cabecalho.chave_pix }}
+            </div>
+            {% endif %}
+
+            {% if cabecalho.texto_rodape %}
+            <div class="footer-notes">
+                <strong>Observações / Garantia:</strong> {{ cabecalho.texto_rodape }}
+            </div>
+            {% endif %}
+
+            <div class="signatures-grid">
+                <div class="sig-line">
+                    {{ dados.cliente.razao_nome|default:"Assinatura do Cliente / Conferente" }}
+                    <div class="sig-sub">Conferência do extrato consolidado</div>
+                </div>
+                <div class="sig-line">
+                    {{ cabecalho.titulo|default:"Assinatura da Empresa" }}
+                    <div class="sig-sub">Responsável pela emissão</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PÁGINAS SEGUINTES (QUANDO IMPRIMIR TODOS DETALHADOS = TRUE) -->
+    {% if modo_detalhado %}
+        {% for r in dados.registros %}
+        <div class="page-sheet batch-page">
+            {% if r.tipo == 'VENDA' %}
+                {% include "admin/vendas/venda/_venda_via.html" with venda=r.obj itens=r.itens titulos=r.titulos via_num=1 via_class="" %}
+            {% else %}
+                {% include "admin/ordem_servico/ordemservico/_os_via.html" with ordem=r.obj itens=r.itens titulos=r.titulos via_num=1 via_class="" %}
+            {% endif %}
+        </div>
+        {% endfor %}
+    {% endif %}
+
+</body>
+</html>

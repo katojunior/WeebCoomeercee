@@ -91,11 +91,18 @@
     document.addEventListener('DOMContentLoaded', function () {
         const tipoSelect = document.getElementById('id_juridica_fisica');
         const cpfCnpjInput = document.getElementById('id_cnpj_cpf');
+        const cnpjEmpresaInput = document.getElementById('id_cnpj');
 
         bindMask(document.getElementById('id_cep'), formatCep);
         bindMask(document.getElementById('id_celular'), formatPhone);
         bindMask(document.getElementById('id_telefone'), formatPhone);
         bindMask(document.getElementById('id_telefone2'), formatPhone);
+
+        if (cnpjEmpresaInput) {
+            bindMask(cnpjEmpresaInput, function (val) {
+                return formatCpfCnpj(val, null);
+            });
+        }
 
         if (cpfCnpjInput) {
             bindMask(cpfCnpjInput, function (val) {

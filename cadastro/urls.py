@@ -4,6 +4,7 @@ from .views import (
     CidadesAPIView, CidadeAPIView,
     PessoasAPIView, PessoaAPIView,
     ClientesAPIView, ClienteAPIView,
+    EmpresasAPIView, EmpresaAPIView, EmpresaPrincipalAPIView,
 )
 
 urlpatterns = [
@@ -18,6 +19,10 @@ urlpatterns = [
 
     path('pessoas/', PessoasAPIView.as_view(), name='pessoas'),
     path('pessoas/<int:pk>/', PessoaAPIView.as_view(), name='pessoa'),
+
+    path('empresas/', EmpresasAPIView.as_view(), name='empresas'),
+    path('empresas/principal/', EmpresaPrincipalAPIView.as_view(), name='empresa_principal'),
+    path('empresas/<int:pk>/', EmpresaAPIView.as_view(), name='empresa'),
 
     # Rotas legadas para compatibilidade
     path('clientes/', ClientesAPIView.as_view(), name='clientes'),

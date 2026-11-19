@@ -1,0 +1,84 @@
+{% load i18n %}
+<details data-filter-title="{{ title }}" open class="drf-details">
+  <summary>
+    {% blocktranslate with filter_title=title %} By {{ filter_title }} {% endblocktranslate %}
+  </summary>
+
+  <form method="get" action="" class="drf-form" style="padding: 8px 15px 10px 15px;">
+    {% for k, v in spec.preserved_params %}
+      <input type="hidden" name="{{ k }}" value="{{ v }}">
+    {% endfor %}
+
+    <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px;">
+      <label for="id_drf_{{ spec.field_path }}_start" style="font-size: 11px; font-weight: 600; color: var(--body-quiet-color, #666); display: flex; flex-direction: column; gap: 2px;">
+        De:
+        <input
+          type="date"
+          id="id_drf_{{ spec.field_path }}_start"
+          name="{{ spec.lookup_kwarg_start }}"
+          value="{{ spec.start_value }}"
+          class="drf-date-input"
+          style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 12px; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: var(--body-bg, #fff); color: var(--body-fg, #333);"
+        >
+      </label>
+
+      <label for="id_drf_{{ spec.field_path }}_end" style="font-size: 11px; font-weight: 600; color: var(--body-quiet-color, #666); display: flex; flex-direction: column; gap: 2px;">
+        Até:
+        <input
+          type="date"
+          id="id_drf_{{ spec.field_path }}_end"
+          name="{{ spec.lookup_kwarg_end }}"
+          value="{{ spec.end_value }}"
+          class="drf-date-input"
+          style="width: 100%; box-sizing: border-box; padding: 4px 6px; font-size: 12px; border: 1px solid var(--border-color, #ccc); border-radius: 4px; background: var(--body-bg, #fff); color: var(--body-fg, #333);"
+        >
+      </label>
+    </div>
+
+    <div style="display: flex; gap: 6px; align-items: center;">
+      <button
+        type="submit"
+        class="button"
+        style="flex: 1; padding: 5px 10px; font-size: 11px; font-weight: 700; cursor: pointer; background: var(--button-bg, #417690); color: var(--button-fg, #fff); border: none; border-radius: 4px;"
+      >
+        Filtrar
+      </button>
+      {% if spec.is_active %}
+        <a
+          href="{{ spec.clear_query_string|iriencode }}"
+          style="padding: 5px 8px; font-size: 11px; font-weight: 600; text-decoration: none; border: 1px solid var(--border-color, #ccc); border-radius: 4px; color: var(--body-fg, #333);"
+          title="Limpar filtro de data"
+        >
+          Limpar
+        </a>
+      {% endif %}
+    </div>
+  </form>
+
+  <ul>
+  {% for choice in choices %}
+    <li{% if choice.selected %} class="selected"{% endif %}>
+      <a href="{{ choice.query_string|iriencode }}">{{ choice.display }}</a>
+    </li>
+  {% endfor %}
+  </ul>
+</details>
+
+<script>
+(function () {
+    if (window.__drfInitialized) return;
+    window.__drfInitialized = true;
+
+    document.addEventListener('submit', function (event) {
+        var form = event.target;
+        if (!form || !form.classList || !form.classList.contains('drf-form')) return;
+
+        var inputs = form.querySelectorAll('.drf-date-input');
+        inputs.forEach(function (input) {
+            if (!input.value) {
+                input.disabled = true;
+            }
+        });
+    });
+})();
+</script>

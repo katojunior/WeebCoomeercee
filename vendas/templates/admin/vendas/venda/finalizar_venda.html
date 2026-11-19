@@ -1,0 +1,463 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .fin-container {
+        max-width: 920px;
+        margin: 20px auto;
+        background: var(--body-bg, #fff);
+        border: 1px solid var(--hairline-color, #ddd);
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        overflow: hidden;
+    }
+    .fin-header {
+        background: #1e293b;
+        color: #fff;
+        padding: 18px 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .fin-header h2 {
+        margin: 0;
+        font-size: 18px;
+        color: #fff;
+    }
+    .fin-body {
+        padding: 24px;
+    }
+    .fin-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 12px;
+        margin-bottom: 22px;
+        background: var(--darkened-bg, #f8fafc);
+        padding: 16px;
+        border-radius: 6px;
+        border: 1px solid var(--hairline-color, #e2e8f0);
+    }
+    .fin-summary-box {
+        display: flex;
+        flex-direction: column;
+    }
+    .fin-summary-box span.label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--body-quiet-color, #64748b);
+        font-weight: 600;
+    }
+    .fin-summary-box span.value {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--body-fg, #0f172a);
+        margin-top: 4px;
+    }
+    .fin-summary-box span.value.highlight {
+        color: #16a34a;
+        font-size: 20px;
+    }
+    .fin-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-bottom: 20px;
+    }
+    .fin-field {
+        display: flex;
+        flex-direction: column;
+    }
+    .fin-field label {
+        font-weight: 600;
+        margin-bottom: 6px;
+        font-size: 13px;
+    }
+    .fin-field input, .fin-field select {
+        height: 40px !important;
+        min-height: 40px !important;
+        line-height: 1.4 !important;
+        padding: 6px 12px !important;
+        border: 1px solid var(--border-color, #cbd5e1);
+        border-radius: 5px;
+        font-size: 14px;
+        background-color: var(--body-bg, #fff);
+        color: var(--body-fg, #111);
+        box-sizing: border-box;
+        width: 100%;
+    }
+    .quitada-cards {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-bottom: 20px;
+    }
+    .quitada-card {
+        border: 2px solid var(--border-color, #cbd5e1);
+        border-radius: 8px;
+        padding: 14px 16px;
+        cursor: pointer;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        transition: all 0.15s ease;
+    }
+    .quitada-card.active-pago {
+        border-color: #16a34a;
+        background: rgba(22, 163, 74, 0.08);
+    }
+    .quitada-card.active-aberto {
+        border-color: #d97706;
+        background: rgba(217, 119, 6, 0.08);
+    }
+    .quitada-card input[type="radio"] {
+        margin-top: 3px;
+    }
+    .quitada-card .card-title {
+        font-weight: 700;
+        font-size: 14px;
+        display: block;
+    }
+    .quitada-card .card-desc {
+        font-size: 12px;
+        color: var(--body-quiet-color, #64748b);
+        margin-top: 3px;
+        display: block;
+    }
+    .preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        font-size: 13px;
+    }
+    .preview-table th, .preview-table td {
+        border: 1px solid var(--hairline-color, #e2e8f0);
+        padding: 8px 12px;
+        text-align: left;
+    }
+    .preview-table th {
+        background: var(--darkened-bg, #f1f5f9);
+        font-weight: 600;
+    }
+    .badge-pago {
+        background: #dcfce7;
+        color: #166534;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 11px;
+    }
+    .badge-aberto {
+        background: #fef3c7;
+        color: #92400e;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 11px;
+    }
+    .alert-sem-cliente {
+        display: none;
+        background: #fef2f2;
+        border: 1px solid #f87171;
+        color: #991b1b;
+        padding: 10px 14px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 16px;
+    }
+    .fin-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--hairline-color, #e2e8f0);
+    }
+    .btn-cancel {
+        padding: 10px 18px;
+        border-radius: 5px;
+        border: 1px solid #94a3b8;
+        color: var(--body-fg, #334155);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .btn-confirm {
+        padding: 10px 22px;
+        border-radius: 5px;
+        border: none;
+        background: #16a34a;
+        color: #fff;
+        font-weight: 700;
+        font-size: 14px;
+        cursor: pointer;
+    }
+    .btn-confirm:hover {
+        background: #15803d;
+    }
+    .btn-confirm:disabled {
+        background: #94a3b8;
+        cursor: not-allowed;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Início</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='vendas' %}">Vendas</a>
+    &rsaquo; <a href="{% url 'admin:vendas_venda_changelist' %}">Vendas</a>
+    &rsaquo; <a href="{% url 'admin:vendas_venda_change' venda.pk %}">Venda #{{ venda.id|stringformat:"06d" }}</a>
+    &rsaquo; Finalizar e Gerar Contas a Receber
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="fin-container" data-tem-cliente="{% if venda.cliente_id %}1{% else %}0{% endif %}">
+    <div class="fin-header">
+        <h2>✅ Finalização e Faturamento da Venda #{{ venda.id|stringformat:"06d" }}</h2>
+        <span>Cliente: <strong>{{ venda.cliente.razao_nome|default:"CONSUMIDOR FINAL / BALCÃO" }}</strong></span>
+    </div>
+
+    <form method="post" class="fin-body" id="form-finalizar-venda">
+        {% csrf_token %}
+
+        <div class="fin-summary-grid">
+            <div class="fin-summary-box">
+                <span class="label">Vendedor</span>
+                <span class="value">{{ venda.vendedor.razao_nome|default:"—" }}</span>
+            </div>
+            <div class="fin-summary-box">
+                <span class="label">Subtotal dos Itens</span>
+                <span class="value" id="disp-subtotal" data-val="{{ venda.subtotal|stringformat:'.2f' }}">R$ {{ venda.subtotal }}</span>
+            </div>
+            <div class="fin-summary-box">
+                <span class="label">Qtd. de Itens</span>
+                <span class="value">{{ venda.itens.count }} item(ns)</span>
+            </div>
+            <div class="fin-summary-box">
+                <span class="label">Valor Líquido Final</span>
+                <span class="value highlight" id="disp-total">R$ {{ venda.valor_total }}</span>
+            </div>
+        </div>
+
+        <div id="alert-sem-cliente" class="alert-sem-cliente">
+            ⚠️ Atenção: Esta venda está sem Cliente identificado (Consumidor / Balcão). Vendas <strong>A Prazo (Em Aberto)</strong> exigem que um Cliente seja informado na venda.
+        </div>
+
+        <h3 style="margin: 0 0 10px 0; font-size: 14px;">1. Situação do Pagamento (Está Quitada?)</h3>
+        <div class="quitada-cards">
+            <label class="quitada-card" id="card-quitada-sim">
+                <input type="radio" name="quitada" value="1" {% if default_quitada %}checked{% endif %}>
+                <div>
+                    <span class="card-title">✅ SIM — Já está Quitada (Recebido no ato)</span>
+                    <span class="card-desc">Gera o Contas a Receber já baixado como <strong>QUITADO (PAGO)</strong> e registra a entrada no Caixa/Conta.</span>
+                </div>
+            </label>
+            <label class="quitada-card" id="card-quitada-nao">
+                <input type="radio" name="quitada" value="0" {% if not default_quitada %}checked{% endif %}>
+                <div>
+                    <span class="card-title">⏳ NÃO — Deixar em Aberto (A Receber)</span>
+                    <span class="card-desc">Gera as parcelas <strong>EM ABERTO</strong> no Contas a Receber para cobrança e baixa futura.</span>
+                </div>
+            </label>
+        </div>
+
+        <h3 style="margin: 18px 0 12px 0; font-size: 14px;">2. Condições Financeiras e Parcelamento</h3>
+        <div class="fin-form-grid">
+            <div class="fin-field">
+                <label for="id_condicao_pagamento">Condição / Forma de Pagamento:</label>
+                <select name="condicao_pagamento" id="id_condicao_pagamento" required>
+                    {% for val, label in condicoes_pagamento %}
+                        <option value="{{ val }}" {% if venda.condicao_pagamento == val %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="fin-field">
+                <label for="id_numero_parcelas">Número de Parcelas:</label>
+                <input type="number" name="numero_parcelas" id="id_numero_parcelas" min="1" max="120" value="{{ venda.numero_parcelas|default:1 }}" required>
+            </div>
+
+            <div class="fin-field">
+                <label for="id_intervalo_dias">Intervalo entre Parcelas (dias):</label>
+                <input type="number" name="intervalo_dias" id="id_intervalo_dias" min="0" max="365" value="{{ venda.intervalo_dias|default:30 }}" required>
+            </div>
+
+            <div class="fin-field">
+                <label for="id_data_primeiro_vencimento">1º Vencimento / Data do Pagamento:</label>
+                <input type="date" name="data_primeiro_vencimento" id="id_data_primeiro_vencimento" value="{{ data_vencimento_iso }}" required>
+            </div>
+
+            <div class="fin-field">
+                <label for="id_conta_destino">Conta / Caixa de Recebimento:</label>
+                <select name="conta_destino" id="id_conta_destino">
+                    <option value="">--- Caixa Geral Padrão ---</option>
+                    {% for conta in contas_bancarias %}
+                        <option value="{{ conta.pk }}" {% if venda.conta_destino_id == conta.pk %}selected{% endif %}>{{ conta }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="fin-field">
+                <label for="id_desconto">Desconto Geral na Venda (R$):</label>
+                <input type="number" step="0.01" min="0" name="desconto" id="id_desconto" value="{{ venda.desconto|stringformat:'.2f' }}">
+            </div>
+
+            <div class="fin-field">
+                <label for="id_numero_nf">Número NF (Opcional):</label>
+                <input type="text" name="numero_nf" id="id_numero_nf" value="{{ venda.numero_nf|default:'' }}">
+            </div>
+
+            <div class="fin-field">
+                <label for="id_numero_cupom_fiscal">Cupom Fiscal / CF (Opcional):</label>
+                <input type="text" name="numero_cupom_fiscal" id="id_numero_cupom_fiscal" value="{{ venda.numero_cupom_fiscal|default:'' }}">
+            </div>
+        </div>
+
+        <h3 style="margin: 18px 0 8px 0; font-size: 14px;">3. Prévia das Parcelas que serão geradas no Contas a Receber</h3>
+        <table class="preview-table">
+            <thead>
+                <tr>
+                    <th>Parcela</th>
+                    <th>Vencimento</th>
+                    <th>Forma de Pagamento</th>
+                    <th>Valor (R$)</th>
+                    <th>Situação no Contas a Receber</th>
+                </tr>
+            </thead>
+            <tbody id="preview-parcelas-body">
+            </tbody>
+        </table>
+
+        <div class="fin-actions">
+            <a href="{% url 'admin:vendas_venda_change' venda.pk %}" class="btn-cancel">Voltar para a Venda</a>
+            <button type="submit" class="btn-confirm" id="btn-confirm-fin">✅ Confirmar Finalização e Gerar Contas a Receber</button>
+        </div>
+    </form>
+</div>
+
+<script>
+(function() {
+    var container = document.querySelector('.fin-container');
+    var temCliente = container.getAttribute('data-tem-cliente') === '1';
+    var subtotal = parseFloat(document.getElementById('disp-subtotal').getAttribute('data-val').replace(',', '.')) || 0;
+    var condSelect = document.getElementById('id_condicao_pagamento');
+    var numInput = document.getElementById('id_numero_parcelas');
+    var intInput = document.getElementById('id_intervalo_dias');
+    var vencInput = document.getElementById('id_data_primeiro_vencimento');
+    var descInput = document.getElementById('id_desconto');
+    var radiosQuitada = document.querySelectorAll('input[name="quitada"]');
+    var cardSim = document.getElementById('card-quitada-sim');
+    var cardNao = document.getElementById('card-quitada-nao');
+    var tbody = document.getElementById('preview-parcelas-body');
+    var dispTotal = document.getElementById('disp-total');
+    var alertSemCliente = document.getElementById('alert-sem-cliente');
+    var btnConfirm = document.getElementById('btn-confirm-fin');
+
+    function formatBRL(v) {
+        return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function isQuitadaSelected() {
+        var checked = document.querySelector('input[name="quitada"]:checked');
+        return checked && checked.value === '1';
+    }
+
+    function syncCards() {
+        var quitada = isQuitadaSelected();
+        if (quitada) {
+            cardSim.classList.add('active-pago');
+            cardNao.classList.remove('active-aberto');
+            alertSemCliente.style.display = 'none';
+            btnConfirm.disabled = false;
+        } else {
+            cardSim.classList.remove('active-pago');
+            cardNao.classList.add('active-aberto');
+            if (!temCliente) {
+                alertSemCliente.style.display = 'block';
+                btnConfirm.disabled = true;
+            } else {
+                alertSemCliente.style.display = 'none';
+                btnConfirm.disabled = false;
+            }
+        }
+    }
+
+    function renderPreview() {
+        syncCards();
+        var desc = parseFloat((descInput.value || '0').replace(',', '.')) || 0;
+        var total = Math.max(0, subtotal - desc);
+        dispTotal.textContent = formatBRL(total);
+
+        var n = Math.max(1, parseInt(numInput.value || '1', 10));
+        var intervalo = Math.max(0, parseInt(intInput.value || '30', 10));
+        var dtBaseStr = vencInput.value;
+        var dtBase = dtBaseStr ? new Date(dtBaseStr + 'T12:00:00') : new Date();
+        var condTexto = condSelect.options[condSelect.selectedIndex] ? condSelect.options[condSelect.selectedIndex].text : '';
+        var quitada = isQuitadaSelected();
+
+        if (total <= 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:#64748b;">Venda sem valor financeiro (R$ 0,00) — será apenas encerrada sem gerar títulos.</td></tr>';
+            return;
+        }
+
+        var porParcela = Math.round((total / n) * 100) / 100;
+        var ultima = Math.round((total - porParcela * (n - 1)) * 100) / 100;
+        var html = '';
+
+        for (var i = 0; i < n; i++) {
+            var val = (i === n - 1) ? ultima : porParcela;
+            var d = new Date(dtBase.getTime());
+            d.setDate(d.getDate() + (intervalo * i));
+            var dd = String(d.getDate()).padStart(2, '0');
+            var mm = String(d.getMonth() + 1).padStart(2, '0');
+            var yyyy = d.getFullYear();
+
+            var badge = quitada
+                ? '<span class="badge-pago">QUITADO (PAGO)</span>'
+                : '<span class="badge-aberto">EM ABERTO (A RECEBER)</span>';
+
+            html += '<tr>' +
+                '<td><strong>' + (i + 1) + '/' + n + '</strong></td>' +
+                '<td>' + dd + '/' + mm + '/' + yyyy + '</td>' +
+                '<td>' + condTexto + '</td>' +
+                '<td><strong>' + formatBRL(val) + '</strong></td>' +
+                '<td>' + badge + '</td>' +
+                '</tr>';
+        }
+        tbody.innerHTML = html;
+    }
+
+    condSelect.addEventListener('change', function() {
+        var v = condSelect.value;
+        var n = parseInt(numInput.value || '1', 10);
+        if ((v === 'DINHEIRO' || v === 'PIX' || v === 'CARTAO_DEBITO') && n === 1) {
+            document.querySelector('input[name="quitada"][value="1"]').checked = true;
+        } else if (v === 'BOLETO' || v === 'CREDIARIO' || n > 1) {
+            document.querySelector('input[name="quitada"][value="0"]').checked = true;
+        }
+        renderPreview();
+    });
+
+    numInput.addEventListener('change', function() {
+        var n = parseInt(numInput.value || '1', 10);
+        if (n > 1) {
+            document.querySelector('input[name="quitada"][value="0"]').checked = true;
+        }
+        renderPreview();
+    });
+
+    [numInput, intInput, vencInput, descInput].forEach(function(el) {
+        el.addEventListener('input', renderPreview);
+        el.addEventListener('change', renderPreview);
+    });
+    radiosQuitada.forEach(function(r) {
+        r.addEventListener('change', renderPreview);
+    });
+
+    renderPreview();
+})();
+</script>
+{% endblock %}

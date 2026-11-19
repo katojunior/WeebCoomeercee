@@ -1,9 +1,12 @@
-from rest_framework import generics, filters, serializers
+from rest_framework import generics, filters, serializers, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Estado, Cidade, Pessoas, Pessoa, Cliente
+from .models import Estado, Cidade, Pessoas, Pessoa, Cliente, Empresa
 from .serializers import (
     EstadoSerializer, CidadeSerializer,
     PessoasSerializer, PessoaSerializer, ClienteSerializer,
+    EmpresaSerializer,
 )
 
 
@@ -101,3 +104,33 @@ class PessoaAPIView(generics.RetrieveUpdateDestroyAPIView):
 # Aliases para compatibilidade
 ClientesAPIView = PessoasAPIView
 ClienteAPIView = PessoaAPIView
+
+
+class EmpresasAPIView(BatchListCreateAPIView):
+    queryset = Empresa.objects.select_related('cidade', 'cidade__uf').all()
+    serializer_class = EmpresaSerializer
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['ativa', 'matriz', 'regime_tributario', 'cidade']
+    search_fields = ['razao_social', 'nome_fantasia', 'cnpj', 'inscricao_estadual']
+    ordering_fields = ['razao_social', 'nome_fantasia', 'id']
+    ordering = ['-matriz', 'razao_social']
+
+
+class EmpresaAPIView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = Empresa.objects.select_related('cidade', 'cidade__uf').all()
+    serializer_class = EmpresaSerializer
+
+
+class EmpresaPrincipalAPIView(APIView):
+    """Retorna os dados da empresa matriz/principal ativa (incluindo cabeçalho de impressão)."""
+
+    def get(self, request):
+        empresa = Empresa.get_principal()
+        if not empresa:
+            return Response(
+                {'detail': 'Nenhuma empresa cadastrada.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        serializer = EmpresaSerializer(empresa, context={'request': request})
+        return Response(serializer.data)
+

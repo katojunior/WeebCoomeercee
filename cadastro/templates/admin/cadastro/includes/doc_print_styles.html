@@ -1,0 +1,560 @@
+<style>
+    :root {
+        --ink: #0f172a;
+        --muted: #475569;
+        --border: #cbd5e1;
+        --bg-soft: #f8fafc;
+        --accent: #1e293b;
+        --green: #166534;
+        --green-bg: #dcfce7;
+        --amber: #92400e;
+        --amber-bg: #fef3c7;
+    }
+    * {
+        box-sizing: border-box;
+    }
+    body {
+        margin: 0;
+        padding: 0;
+        background: #e2e8f0;
+        color: var(--ink);
+        font-family: "Segoe UI", Roboto, Arial, sans-serif;
+        font-size: 12px;
+        line-height: 1.36;
+    }
+
+    /* --- BARRA DE CONTROLE NO NAVEGADOR (OCULTA NA IMPRESSÃO) --- */
+    .print-toolbar {
+        position: sticky;
+        top: 0;
+        z-index: 100;
+        background: #0f172a;
+        color: #fff;
+        padding: 12px 24px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+    }
+    .toolbar-left {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex-wrap: wrap;
+    }
+    .toolbar-title {
+        font-size: 15px;
+        font-weight: 700;
+    }
+    .mode-selector {
+        display: inline-flex;
+        background: #1e293b;
+        border-radius: 6px;
+        padding: 3px;
+        border: 1px solid #334155;
+    }
+    .mode-btn {
+        background: transparent;
+        color: #cbd5e1;
+        border: none;
+        padding: 6px 12px;
+        font-size: 12px;
+        font-weight: 600;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .mode-btn.active {
+        background: #2563eb;
+        color: #fff;
+    }
+    .toolbar-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+    }
+    .btn-back {
+        color: #cbd5e1;
+        text-decoration: none;
+        padding: 7px 14px;
+        border: 1px solid #475569;
+        border-radius: 5px;
+        font-weight: 600;
+        font-size: 12px;
+    }
+    .btn-back:hover {
+        background: #1e293b;
+        color: #fff;
+    }
+    .btn-print {
+        background: #16a34a;
+        color: #fff;
+        border: none;
+        padding: 8px 18px;
+        border-radius: 5px;
+        font-weight: 700;
+        font-size: 13px;
+        cursor: pointer;
+    }
+    .btn-print:hover {
+        background: #15803d;
+    }
+
+    /* --- CONTAINER DA PÁGINA --- */
+    .page-sheet {
+        width: 210mm;
+        min-height: 297mm;
+        margin: 18px auto;
+        padding: 10mm 12mm;
+        background: #fff;
+        box-shadow: 0 6px 24px rgba(0,0,0,0.12);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .page-sheet.batch-page {
+        min-height: 280mm;
+        justify-content: flex-start;
+        gap: 10px;
+        page-break-after: always;
+        break-after: page;
+    }
+    .page-sheet.batch-page:last-child {
+        page-break-after: auto;
+        break-after: auto;
+    }
+
+    .via-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+    }
+    .via-Segunda {
+        display: none;
+    }
+    .cut-line {
+        display: none;
+        border-top: 1px dashed #64748b;
+        margin: 5mm 0;
+        text-align: center;
+        position: relative;
+        height: 1px;
+    }
+    .cut-line span {
+        position: relative;
+        top: -9px;
+        background: #fff;
+        padding: 0 10px;
+        font-size: 10px;
+        color: #64748b;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    /* --- CABEÇALHO DA EMPRESA --- */
+    .doc-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border: 1.5px solid var(--accent);
+        border-radius: 6px;
+        padding: 9px 14px;
+        gap: 14px;
+        background: var(--bg-soft);
+    }
+    .company-brand {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        flex: 1;
+    }
+    .company-logo {
+        max-width: 135px;
+        max-height: 65px;
+        object-fit: contain;
+    }
+    .company-logo-placeholder {
+        width: 56px;
+        height: 56px;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        font-size: 19px;
+        flex-shrink: 0;
+        letter-spacing: 1px;
+    }
+    .company-info {
+        line-height: 1.32;
+    }
+    .company-title {
+        font-size: 15.5px;
+        font-weight: 800;
+        color: #000;
+        margin: 0;
+    }
+    .company-subtitle {
+        font-size: 11px;
+        color: var(--muted);
+        font-weight: 600;
+        margin: 1px 0;
+    }
+    .company-detail {
+        font-size: 10.5px;
+        color: #1e293b;
+    }
+    .company-contacts {
+        font-size: 10.5px;
+        font-weight: 700;
+        color: #0f172a;
+        margin-top: 2px;
+    }
+
+    .doc-box {
+        text-align: right;
+        border-left: 1.5px solid var(--border);
+        padding-left: 14px;
+        min-width: 185px;
+    }
+    .doc-type {
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        color: var(--muted);
+        letter-spacing: 0.4px;
+    }
+    .doc-number {
+        font-size: 19px;
+        font-weight: 900;
+        color: #000;
+        margin: 1px 0;
+    }
+    .doc-meta {
+        font-size: 10.5px;
+        color: var(--ink);
+    }
+    .via-badge {
+        display: inline-block;
+        margin-top: 3px;
+        padding: 2px 7px;
+        font-size: 9.5px;
+        font-weight: 700;
+        background: #e2e8f0;
+        border-radius: 4px;
+        color: #1e293b;
+    }
+
+    /* --- SEÇÕES E BLOCOS --- */
+    .section-box {
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        overflow: hidden;
+    }
+    .section-title {
+        background: var(--accent);
+        color: #fff;
+        font-size: 10.5px;
+        font-weight: 700;
+        text-transform: uppercase;
+        padding: 4px 10px;
+        letter-spacing: 0.4px;
+        display: flex;
+        justify-content: space-between;
+    }
+    .info-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 5px 12px;
+        padding: 7px 10px;
+    }
+    .info-cell {
+        display: flex;
+        flex-direction: column;
+    }
+    .info-cell.span-2 {
+        grid-column: span 2;
+    }
+    .info-cell.span-3 {
+        grid-column: span 3;
+    }
+    .info-cell.span-4 {
+        grid-column: span 4;
+    }
+    .info-label {
+        font-size: 9.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 700;
+    }
+    .info-val {
+        font-size: 11px;
+        font-weight: 600;
+        color: #000;
+    }
+
+    .laudo-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        padding: 7px 10px;
+    }
+    .laudo-box {
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        padding: 5px 8px;
+        background: #fcfcfd;
+    }
+
+    /* --- TABELA DE ITENS --- */
+    .items-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10.5px;
+    }
+    .items-table th {
+        background: #f1f5f9;
+        color: #0f172a;
+        font-weight: 700;
+        text-transform: uppercase;
+        font-size: 9.5px;
+        padding: 4px 8px;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+    }
+    .items-table td {
+        padding: 4px 8px;
+        border-bottom: 1px solid #e2e8f0;
+    }
+    .items-table tr:last-child td {
+        border-bottom: none;
+    }
+    .text-right {
+        text-align: right !important;
+    }
+    .text-center {
+        text-align: center !important;
+    }
+    .tipo-badge {
+        font-size: 9px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #e2e8f0;
+        color: #1e293b;
+    }
+
+    /* --- TOTAIS E FINANCEIRO --- */
+    .bottom-split {
+        display: grid;
+        grid-template-columns: 1.45fr 1fr;
+        gap: 10px;
+    }
+    .totals-box {
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 7px 12px;
+        background: var(--bg-soft);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 3px;
+    }
+    .total-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+    }
+    .total-row.grand-total {
+        border-top: 1.5px solid var(--accent);
+        padding-top: 4px;
+        margin-top: 2px;
+        font-size: 13.5px;
+        font-weight: 900;
+        color: #000;
+    }
+    .status-pill {
+        display: inline-block;
+        padding: 1px 7px;
+        border-radius: 10px;
+        font-size: 9.5px;
+        font-weight: 700;
+    }
+    .status-pago {
+        background: var(--green-bg);
+        color: var(--green);
+    }
+    .status-aberto {
+        background: var(--amber-bg);
+        color: var(--amber);
+    }
+
+    /* --- RODAPÉ E ASSINATURAS --- */
+    .footer-notes {
+        font-size: 10px;
+        color: #334155;
+        border: 1px dashed var(--border);
+        border-radius: 5px;
+        padding: 5px 10px;
+        background: #fcfcfd;
+    }
+    .signatures-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 28px;
+        margin-top: 14px;
+        padding-top: 6px;
+    }
+    .sig-line {
+        border-top: 1px solid #0f172a;
+        text-align: center;
+        padding-top: 4px;
+        font-size: 10px;
+        font-weight: 600;
+    }
+    .sig-sub {
+        font-size: 9px;
+        color: var(--muted);
+        font-weight: 400;
+    }
+
+    /* --- CARDS DA CAPA DE RESUMO --- */
+    .cover-cards {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+    }
+    .cover-card {
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 8px 10px;
+        background: var(--bg-soft);
+    }
+    .cover-card .lbl {
+        font-size: 9.5px;
+        text-transform: uppercase;
+        color: var(--muted);
+        font-weight: 700;
+        display: block;
+    }
+    .cover-card .val {
+        font-size: 15px;
+        font-weight: 800;
+        color: #000;
+        display: block;
+        margin-top: 2px;
+    }
+    .cover-card .sub {
+        font-size: 10px;
+        color: var(--muted);
+        display: block;
+    }
+
+    /* --- MODO 2 VIAS NA MESMA FOLHA A4 --- */
+    body.mode-2vias .via-Segunda {
+        display: flex;
+    }
+    body.mode-2vias .cut-line {
+        display: block;
+    }
+    body.mode-2vias .page-sheet {
+        padding: 6mm 9mm;
+    }
+    body.mode-2vias .via-wrapper {
+        gap: 4px;
+    }
+    body.mode-2vias .doc-header {
+        padding: 5px 9px;
+    }
+    body.mode-2vias .company-title {
+        font-size: 13px;
+    }
+    body.mode-2vias .company-detail,
+    body.mode-2vias .company-contacts,
+    body.mode-2vias .doc-meta {
+        font-size: 9.5px;
+    }
+    body.mode-2vias .doc-number {
+        font-size: 15px;
+    }
+    body.mode-2vias .info-grid,
+    body.mode-2vias .laudo-grid {
+        padding: 4px 8px;
+        gap: 3px 8px;
+    }
+    body.mode-2vias .info-val {
+        font-size: 10px;
+    }
+    body.mode-2vias .items-table th,
+    body.mode-2vias .items-table td {
+        padding: 2.5px 6px;
+        font-size: 9.5px;
+    }
+    body.mode-2vias .signatures-grid {
+        margin-top: 8px;
+    }
+
+    /* --- MODO CUPOM TÉRMICO 80MM --- */
+    body.mode-80mm .page-sheet {
+        width: 80mm;
+        min-height: auto;
+        padding: 4mm;
+        font-family: "Courier New", Courier, monospace;
+        font-size: 11px;
+    }
+    body.mode-80mm .doc-header {
+        flex-direction: column;
+        text-align: center;
+        padding: 6px;
+    }
+    body.mode-80mm .company-brand {
+        flex-direction: column;
+        gap: 6px;
+    }
+    body.mode-80mm .doc-box {
+        border-left: none;
+        border-top: 1px dashed var(--border);
+        padding-left: 0;
+        padding-top: 6px;
+        text-align: center;
+        width: 100%;
+    }
+    body.mode-80mm .info-grid,
+    body.mode-80mm .laudo-grid,
+    body.mode-80mm .bottom-split,
+    body.mode-80mm .signatures-grid,
+    body.mode-80mm .cover-cards {
+        grid-template-columns: 1fr;
+    }
+    body.mode-80mm .info-cell.span-2,
+    body.mode-80mm .info-cell.span-3,
+    body.mode-80mm .info-cell.span-4 {
+        grid-column: span 1;
+    }
+    body.mode-80mm .hide-80mm {
+        display: none !important;
+    }
+
+    @media print {
+        body {
+            background: #fff;
+        }
+        .print-toolbar {
+            display: none !important;
+        }
+        .page-sheet {
+            margin: 0;
+            box-shadow: none;
+            width: 100%;
+            min-height: auto;
+        }
+        @page {
+            size: A4 portrait;
+            margin: 7mm;
+        }
+    }
+</style>

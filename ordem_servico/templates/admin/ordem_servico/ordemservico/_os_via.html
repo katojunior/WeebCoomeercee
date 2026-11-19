@@ -1,0 +1,260 @@
+<div class="via-wrapper {{ via_class|default:'' }}">
+    <!-- 1. CABEÇALHO DA EMPRESA -->
+    <div class="doc-header">
+        <div class="company-brand">
+            {% if cabecalho.logo_url %}
+                <img src="{{ cabecalho.logo_url }}" alt="Logo" class="company-logo">
+            {% else %}
+                <div class="company-logo-placeholder">
+                    {{ cabecalho.titulo|slice:":2"|default:"OS" }}
+                </div>
+            {% endif %}
+            <div class="company-info">
+                <h1 class="company-title">{{ cabecalho.titulo|default:"EMPRESA NÃO CADASTRADA" }}</h1>
+                {% if cabecalho.subtitulo %}
+                    <div class="company-subtitle">{{ cabecalho.subtitulo }}</div>
+                {% endif %}
+                {% if cabecalho.razao_social and cabecalho.razao_social != cabecalho.titulo %}
+                    <div class="company-detail"><strong>Razão Social:</strong> {{ cabecalho.razao_social }}</div>
+                {% endif %}
+                {% if cabecalho.documento_formatado %}
+                    <div class="company-detail">{{ cabecalho.documento_formatado }}</div>
+                {% endif %}
+                {% if cabecalho.endereco_completo %}
+                    <div class="company-detail">{{ cabecalho.endereco_completo }}</div>
+                {% endif %}
+                {% if cabecalho.contatos_formatados %}
+                    <div class="company-contacts">{{ cabecalho.contatos_formatados }}</div>
+                {% endif %}
+                {% if cabecalho.texto_cabecalho %}
+                    <div class="company-detail" style="margin-top:2px;">{{ cabecalho.texto_cabecalho }}</div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="doc-box">
+            <div class="doc-type">
+                {% if ordem.status == 'ORCAMENTO' %}Orçamento de Serviço{% else %}Ordem de Serviço{% endif %}
+            </div>
+            <div class="doc-number">OS Nº {{ ordem.id|stringformat:"06d" }}</div>
+            <div class="doc-meta"><strong>Abertura:</strong> {{ ordem.data_abertura|date:"d/m/Y H:i" }}</div>
+            {% if ordem.data_conclusao %}
+                <div class="doc-meta"><strong>Conclusão:</strong> {{ ordem.data_conclusao|date:"d/m/Y H:i" }}</div>
+            {% elif ordem.previsao_entrega %}
+                <div class="doc-meta"><strong>Previsão:</strong> {{ ordem.previsao_entrega|date:"d/m/Y" }}</div>
+            {% endif %}
+            <div class="doc-meta"><strong>Status:</strong> {{ ordem.get_status_display }}</div>
+            <span class="via-badge">
+                {% if via_num == 2 %}2ª VIA — COMPROVANTE CLIENTE{% else %}1ª VIA — EMPRESA / ASSISTÊNCIA{% endif %}
+            </span>
+        </div>
+    </div>
+
+    <!-- 2. DADOS DO CLIENTE E EQUIPAMENTO -->
+    <div class="section-box">
+        <div class="section-title">
+            <span>Dados do Cliente e Equipamento</span>
+            <span>Técnico: {{ ordem.tecnico.razao_nome|default:"A DEFINIR" }}</span>
+        </div>
+        <div class="info-grid">
+            <div class="info-cell span-2">
+                <span class="info-label">Cliente / Razão Social</span>
+                <span class="info-val">{{ ordem.cliente.razao_nome }}</span>
+            </div>
+            <div class="info-cell">
+                <span class="info-label">CNPJ / CPF</span>
+                <span class="info-val">{{ ordem.cliente.cnpj_cpf|default:"—" }}</span>
+            </div>
+            <div class="info-cell">
+                <span class="info-label">Telefone / Celular</span>
+                <span class="info-val">{{ ordem.cliente.celular|default:ordem.cliente.telefone|default:"—" }}</span>
+            </div>
+            <div class="info-cell span-2">
+                <span class="info-label">Endereço</span>
+                <span class="info-val">
+                    {% if ordem.cliente.endereco %}
+                        {{ ordem.cliente.endereco }}{% if ordem.cliente.numero %}, {{ ordem.cliente.numero }}{% endif %}{% if ordem.cliente.bairro %} - {{ ordem.cliente.bairro }}{% endif %}
+                    {% else %}
+                        —
+                    {% endif %}
+                </span>
+            </div>
+            <div class="info-cell span-2">
+                <span class="info-label">Equipamento / Marca / Modelo / Nº de Série (S/N)</span>
+                <span class="info-val">
+                    {% if ordem.equipamento %}
+                        {{ ordem.equipamento.descricao }}
+                        {% if ordem.equipamento.marca %} | Marca: {{ ordem.equipamento.marca.nome }}{% endif %}
+                        {% if ordem.equipamento.modelo %} | Mod: {{ ordem.equipamento.modelo }}{% endif %}
+                        {% if ordem.equipamento.numero_serie %} | S/N: {{ ordem.equipamento.numero_serie }}{% endif %}
+                    {% else %}
+                        —
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. DIAGNÓSTICO E LAUDO TÉCNICO -->
+    <div class="section-box">
+        <div class="section-title">
+            <span>Diagnóstico e Laudo Técnico</span>
+        </div>
+        <div class="laudo-grid">
+            <div class="laudo-box">
+                <span class="info-label">Defeito Reclamado / Relato do Cliente</span>
+                <div class="info-val" style="margin-top:2px; white-space:pre-line;">{{ ordem.defeito_reclamado|default:"Não informado." }}</div>
+            </div>
+            <div class="laudo-box">
+                <span class="info-label">Laudo Técnico / Serviço Executado</span>
+                <div class="info-val" style="margin-top:2px; white-space:pre-line;">{{ ordem.laudo_tecnico|default:"Em avaliação técnica." }}</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. TABELA DE PEÇAS E SERVIÇOS -->
+    <div class="section-box">
+        <div class="section-title">
+            <span>Peças Aplicadas e Serviços Executados</span>
+            <span>{{ itens|length }} item(ns)</span>
+        </div>
+        <table class="items-table">
+            <thead>
+                <tr>
+                    <th style="width:32px;" class="hide-80mm">#</th>
+                    <th style="width:75px;" class="hide-80mm">Tipo</th>
+                    <th>Descrição da Peça / Produto / Serviço</th>
+                    <th style="width:65px;" class="text-right">Qtd.</th>
+                    <th style="width:85px;" class="text-right">Vlr. Unit.</th>
+                    <th style="width:95px;" class="text-right">Total (R$)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in itens %}
+                <tr>
+                    <td class="hide-80mm">{{ forloop.counter }}</td>
+                    <td class="hide-80mm">
+                        <span class="tipo-badge">{{ item.get_tipo_item_display }}</span>
+                    </td>
+                    <td>
+                        <strong>
+                            {% if item.produto %}{{ item.produto.nome }}{% endif %}
+                            {% if item.descricao_personalizada %}
+                                {% if item.produto %} — {% endif %}{{ item.descricao_personalizada }}
+                            {% endif %}
+                        </strong>
+                    </td>
+                    <td class="text-right">{{ item.quantidade|floatformat:2 }}</td>
+                    <td class="text-right">R$ {{ item.valor_unitario|floatformat:2 }}</td>
+                    <td class="text-right"><strong>R$ {{ item.valor_total|floatformat:2 }}</strong></td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="6" class="text-center" style="color:#64748b; padding:8px;">Nenhuma peça ou serviço lançado até o momento.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- 5. QUADRO DE FATURAMENTO / PARCELAS + TOTAIS -->
+    <div class="bottom-split">
+        <div class="section-box">
+            <div class="section-title">
+                <span>Faturamento e Condição de Pagamento</span>
+                <span>{{ ordem.get_condicao_pagamento_display }}</span>
+            </div>
+            {% if titulos %}
+            <table class="items-table">
+                <thead>
+                    <tr>
+                        <th>Parcela</th>
+                        <th>Vencimento</th>
+                        <th class="text-right">Valor</th>
+                        <th class="text-center">Situação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in titulos %}
+                    <tr>
+                        <td><strong>{{ t.parcela_numero }}/{{ t.parcela_total }}</strong></td>
+                        <td>{{ t.data_vencimento|date:"d/m/Y" }}</td>
+                        <td class="text-right"><strong>R$ {{ t.valor_original|floatformat:2 }}</strong></td>
+                        <td class="text-center">
+                            {% if t.status == 'PAGO' %}
+                                <span class="status-pill status-pago">QUITADO</span>
+                            {% else %}
+                                <span class="status-pill status-aberto">{{ t.get_status_display|upper }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div style="padding:7px 10px; font-size:10.5px; color:#475569;">
+                Condição Prevista: <strong>{{ ordem.get_condicao_pagamento_display }}</strong>
+                ({{ ordem.numero_parcelas }}x)
+                {% if ordem.forma_pagamento %} — {{ ordem.forma_pagamento }}{% endif %}
+            </div>
+            {% endif %}
+            {% if cabecalho.chave_pix %}
+            <div style="padding:4px 10px; border-top:1px solid #e2e8f0; background:#f8fafc; font-size:10px;">
+                <strong>Chave PIX ({{ cabecalho.titulo }}):</strong> {{ cabecalho.chave_pix }}
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="totals-box">
+            <div class="total-row">
+                <span>Total em Peças:</span>
+                <strong>R$ {{ ordem.valor_pecas|floatformat:2 }}</strong>
+            </div>
+            <div class="total-row">
+                <span>Total em Serviços:</span>
+                <strong>R$ {{ ordem.valor_servicos|floatformat:2 }}</strong>
+            </div>
+            <div class="total-row">
+                <span>Desconto:</span>
+                <strong>- R$ {{ ordem.desconto|floatformat:2 }}</strong>
+            </div>
+            <div class="total-row grand-total">
+                <span>TOTAL DA OS:</span>
+                <span>R$ {{ ordem.valor_total|floatformat:2 }}</span>
+            </div>
+            <div class="total-row" style="margin-top:2px; font-size:10px;">
+                <span>Situação Financeira:</span>
+                {% if ordem.status_financeiro == 'QUITADO' %}
+                    <span class="status-pill status-pago">QUITADO (PAGO)</span>
+                {% elif ordem.status_financeiro == 'EM ABERTO' %}
+                    <span class="status-pill status-aberto">EM ABERTO (A RECEBER)</span>
+                {% else %}
+                    <span>{{ ordem.get_status_display }}</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. OBSERVAÇÕES / GARANTIA E ASSINATURAS -->
+    {% if ordem.observacoes or cabecalho.texto_rodape %}
+    <div class="footer-notes">
+        {% if ordem.observacoes %}
+            <div><strong>Observações:</strong> {{ ordem.observacoes }}</div>
+        {% endif %}
+        {% if cabecalho.texto_rodape %}
+            <div><strong>Termos / Garantia:</strong> {{ cabecalho.texto_rodape }}</div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="signatures-grid">
+        <div class="sig-line">
+            {{ ordem.cliente.razao_nome }}
+            <div class="sig-sub">Assinatura do Cliente (Autorização / Retirada do Equipamento)</div>
+        </div>
+        <div class="sig-line">
+            {{ cabecalho.titulo|default:"Assinatura da Empresa / Técnico" }}
+            <div class="sig-sub">Técnico Responsável: {{ ordem.tecnico.razao_nome|default:"—" }}</div>
+        </div>
+    </div>
+</div>
