@@ -158,7 +158,7 @@ class OrdemServicoModelTestCase(TestCase):
 
     def test_admin_inlines_count(self):
         os_admin = admin.site._registry[OrdemServico]
-        self.assertEqual(len(os_admin.inlines), 2)
+        self.assertEqual(len(os_admin.inlines), 3)
 
     def test_gerar_financeiro_os_avista(self):
         from financeiro.models import ContaBancaria

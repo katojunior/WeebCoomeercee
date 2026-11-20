@@ -413,6 +413,7 @@
             <div class="ext-btn-group">
                 <a href="{% url 'admin:cadastro_extratocliente_changelist' %}" class="ext-btn ext-btn-outline">Limpar Filtros</a>
                 <button type="submit" class="ext-btn ext-btn-primary" id="btn-filtrar">🔍 Filtrar</button>
+                <button type="button" class="ext-btn ext-btn-green" id="btn-finalizar-lote">✅ Finalizar Selecionados em Lote</button>
                 <button type="button" class="ext-btn ext-btn-blue" id="btn-imprimir-resumo">🖨️ Imprimir Resumo</button>
                 <button type="button" class="ext-btn ext-btn-green" id="btn-imprimir-detalhado">🖨️ Imprimir Todos Detalhados</button>
                 <button type="button" class="ext-btn ext-btn-outline" id="btn-exportar-csv">📥 Exportar CSV</button>
@@ -689,6 +690,13 @@
 
         $('#btn-exportar-csv').on('click', function() {
             window.location.href = buildQueryUrl({ exportar: 'csv' });
+        });
+
+        $('#btn-finalizar-lote').on('click', function() {
+            var fullUrl = buildQueryUrl();
+            var qsIndex = fullUrl.indexOf('?');
+            var qs = qsIndex >= 0 ? fullUrl.substring(qsIndex) : '';
+            window.location.href = "{% url 'admin:cadastro_extratocliente_finalizar_lote' %}" + qs;
         });
 
         $('.sort-th-btn').on('click', function() {

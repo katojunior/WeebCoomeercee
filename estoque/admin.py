@@ -5,7 +5,7 @@ from django.contrib import admin
 from django.core.exceptions import ValidationError
 
 from cadastro.admin import AUDITORIA_FIELDSET, BaseAdmin
-from .models import EstoqueLocalizacao, MovimentacaoEstoque
+from .models import MovimentacaoEstoque
 from .services import aplicar_movimentacao, normalizar_lista_novos_seriais, validar_movimentacao
 
 
@@ -48,9 +48,8 @@ class MovimentacaoEstoqueForm(forms.ModelForm):
         mov_preview = MovimentacaoEstoque(
             produto=cleaned_data.get('produto'),
             tipo=cleaned_data.get('tipo'),
+            origem=cleaned_data.get('origem') or 'MANUAL',
             quantidade=cleaned_data.get('quantidade'),
-            localizacao_origem=cleaned_data.get('localizacao_origem'),
-            localizacao_destino=cleaned_data.get('localizacao_destino'),
             pessoa=cleaned_data.get('pessoa'),
             documento_referencia=cleaned_data.get('documento_referencia'),
             motivo=cleaned_data.get('motivo'),
@@ -62,6 +61,7 @@ class MovimentacaoEstoqueForm(forms.ModelForm):
                 seriais=seriais,
                 novos_seriais=novos_seriais,
                 verificar_saldo=True,
+                permitir_saldo_negativo=False,
             )
             self.instance._validado_via_servico = True
         except ValidationError as exc:
@@ -75,70 +75,30 @@ class MovimentacaoEstoqueForm(forms.ModelForm):
         return cleaned_data
 
 
-@admin.register(EstoqueLocalizacao)
-class EstoqueLocalizacaoAdmin(BaseAdmin):
-    """Visualização somente leitura dos saldos de estoque por localização."""
-
-    list_display = ('id', 'produto', 'localizacao', 'quantidade', 'data_hora_atualizada')
-    list_filter = ('localizacao', 'localizacao__setor', 'produto__marca', 'produto__categoria')
-    search_fields = (
-        'produto__nome',
-        'produto__codigo_interno',
-        'localizacao__codigo',
-        'localizacao__setor',
-    )
-    readonly_fields = ('produto', 'localizacao', 'quantidade') + BaseAdmin.readonly_fields
-    actions = None
-
-    def has_add_permission(self, request):
-        return False
-
-    def has_change_permission(self, request, obj=None):
-        return False
-
-    def has_delete_permission(self, request, obj=None):
-        return False
-
-    fieldsets = (
-        ('Saldo por Localização', {
-            'fields': (
-                'produto',
-                'localizacao',
-                'quantidade',
-            )
-        }),
-        AUDITORIA_FIELDSET,
-    )
-
-
 @admin.register(MovimentacaoEstoque)
 class MovimentacaoEstoqueAdmin(BaseAdmin):
-    """Administração de movimentações imutáveis com trilha de auditoria."""
+    """Administração de movimentações imutáveis com trilha de auditoria e origem."""
 
     form = MovimentacaoEstoqueForm
     list_display = (
-        'id', 'data_hora', 'tipo', 'produto', 'quantidade',
-        'localizacao_origem', 'localizacao_destino',
+        'id', 'data_hora', 'tipo', 'origem', 'produto', 'quantidade',
         'saldo_anterior_produto', 'saldo_posterior_produto',
-        'documento_referencia', 'usuario',
+        'venda', 'ordem_servico', 'documento_referencia', 'usuario',
     )
     list_filter = (
-        'tipo', 'localizacao_origem', 'localizacao_destino',
-        'produto__marca', 'produto__categoria', 'data_hora',
+        'tipo', 'origem', 'produto__marca', 'produto__categoria', 'data_hora',
     )
     search_fields = (
         'produto__nome', 'produto__codigo_interno',
         'documento_referencia', 'motivo',
         'numeros_serie__numero_serie', 'pessoa__razao_nome',
     )
-    autocomplete_fields = ('produto', 'localizacao_origem', 'localizacao_destino', 'pessoa', 'numeros_serie')
+    autocomplete_fields = ('produto', 'pessoa', 'numeros_serie')
     readonly_fields = (
         'saldo_anterior_produto',
         'saldo_posterior_produto',
-        'saldo_anterior_origem',
-        'saldo_posterior_origem',
-        'saldo_anterior_destino',
-        'saldo_posterior_destino',
+        'venda',
+        'ordem_servico',
     ) + BaseAdmin.readonly_fields
     actions = None
 
@@ -155,6 +115,7 @@ class MovimentacaoEstoqueAdmin(BaseAdmin):
             obj,
             seriais=seriais,
             novos_seriais=novos_seriais,
+            permitir_saldo_negativo=False,
         )
         obj._seriais_finais = seriais_finais
         super().save_model(request, obj, form, change)
@@ -171,7 +132,7 @@ class MovimentacaoEstoqueAdmin(BaseAdmin):
             ('Dados da Movimentação', {
                 'fields': (
                     ('produto', 'tipo', 'quantidade'),
-                    ('localizacao_origem', 'localizacao_destino'),
+                    'origem',
                 )
             }),
             ('Rastreamento / Números de Série', {
@@ -180,6 +141,7 @@ class MovimentacaoEstoqueAdmin(BaseAdmin):
             ('Origem Comercial e Justificativa', {
                 'fields': (
                     ('pessoa', 'documento_referencia'),
+                    ('venda', 'ordem_servico'),
                     'motivo',
                     'observacoes',
                 )
@@ -187,8 +149,6 @@ class MovimentacaoEstoqueAdmin(BaseAdmin):
             ('Auditoria de Saldos', {
                 'fields': (
                     ('saldo_anterior_produto', 'saldo_posterior_produto'),
-                    ('saldo_anterior_origem', 'saldo_posterior_origem'),
-                    ('saldo_anterior_destino', 'saldo_posterior_destino'),
                 )
             }),
             AUDITORIA_FIELDSET,

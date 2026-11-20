@@ -277,6 +277,14 @@ class Empresa(Base):
         default=True,
         help_text='Define como empresa principal padrão para cabeçalhos de impressão e documentos.',
     )
+    bloquear_fechamento_sem_estoque = models.BooleanField(
+        'Bloquear Venda/OS sem Estoque?',
+        default=False,
+        help_text=(
+            'Quando ativo, impede finalizar Vendas ou Ordens de Serviço caso algum produto com '
+            'controle de estoque não possua saldo suficiente.'
+        ),
+    )
     ativa = models.BooleanField('Ativa?', default=True)
 
     class Meta:

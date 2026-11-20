@@ -1,17 +1,19 @@
+from decimal import Decimal, InvalidOperation
+
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
-from django.db.models.functions import Coalesce
 from django.utils import timezone
 from unidecode import unidecode
 
+from cadastro.models import Empresa
 from cadastro_produto.models import NumeroSerie, Produtos
-from .models import EstoqueLocalizacao, MovimentacaoEstoque
+from .models import MovimentacaoEstoque
 
 
 TIPOS_ENTRADA = {'ENTRADA', 'AJUSTE_ENTRADA'}
 TIPOS_SAIDA = {'SAIDA', 'AJUSTE_SAIDA'}
 TIPOS_AJUSTE = {'AJUSTE_ENTRADA', 'AJUSTE_SAIDA'}
+QTD_ZERO = Decimal('0.000')
 
 
 def normalizar_lista_novos_seriais(novos_seriais):
@@ -21,50 +23,33 @@ def normalizar_lista_novos_seriais(novos_seriais):
     return [unidecode(str(item)).upper().strip() for item in novos_seriais if str(item).strip()]
 
 
-def _obter_saldo_localizacao(produto, localizacao, lock=False):
-    if not produto or not localizacao:
-        return None, 0
-    qs = EstoqueLocalizacao.objects
-    if lock:
-        qs = qs.select_for_update()
-    saldo_obj = qs.filter(produto=produto, localizacao=localizacao).first()
-    return saldo_obj, (saldo_obj.quantidade if saldo_obj else 0)
+def _to_decimal_qtd(valor):
+    if valor is None or valor == '':
+        return None
+    try:
+        return Decimal(str(valor)).quantize(Decimal('0.001'))
+    except (InvalidOperation, ValueError, TypeError):
+        return None
 
 
-def _validar_regras_localizacao_e_motivo(mov, erros):
-    if not mov.quantidade or mov.quantidade <= 0:
+def empresa_bloqueia_sem_estoque():
+    """Indica se a empresa matriz está configurada para bloquear fechamento sem saldo."""
+    empresa = Empresa.objects.filter(matriz=True).first() or Empresa.objects.first()
+    return bool(empresa.bloquear_fechamento_sem_estoque) if empresa else False
+
+
+def _validar_regras_gerais(mov, erros):
+    qtd = _to_decimal_qtd(mov.quantidade)
+    if qtd is None or qtd <= QTD_ZERO:
         erros['quantidade'] = 'A quantidade deve ser maior que zero.'
+    else:
+        mov.quantidade = qtd
+
+    if mov.tipo not in (TIPOS_ENTRADA | TIPOS_SAIDA):
+        erros['tipo'] = 'Tipo de movimentação inválido.'
 
     if mov.tipo in TIPOS_AJUSTE and not (mov.motivo and mov.motivo.strip()):
         erros['motivo'] = 'Informe o motivo/justificativa para ajustes de inventário.'
-
-    if mov.tipo in TIPOS_ENTRADA:
-        if not mov.localizacao_destino_id:
-            erros['localizacao_destino'] = 'Informe a localização de destino para entradas.'
-        elif not mov.localizacao_destino.ativo:
-            erros['localizacao_destino'] = 'A localização de destino está inativa.'
-        if mov.localizacao_origem_id:
-            erros['localizacao_origem'] = 'Entradas não devem possuir localização de origem.'
-    elif mov.tipo in TIPOS_SAIDA:
-        if not mov.localizacao_origem_id:
-            erros['localizacao_origem'] = 'Informe a localização de origem para saídas.'
-        if mov.localizacao_destino_id:
-            erros['localizacao_destino'] = 'Saídas não devem possuir localização de destino.'
-    elif mov.tipo == 'TRANSFERENCIA':
-        if not mov.localizacao_origem_id:
-            erros['localizacao_origem'] = 'Informe a localização de origem da transferência.'
-        if not mov.localizacao_destino_id:
-            erros['localizacao_destino'] = 'Informe a localização de destino da transferência.'
-        elif not mov.localizacao_destino.ativo:
-            erros['localizacao_destino'] = 'A localização de destino está inativa.'
-        if (
-            mov.localizacao_origem_id
-            and mov.localizacao_destino_id
-            and mov.localizacao_origem_id == mov.localizacao_destino_id
-        ):
-            erros['localizacao_destino'] = 'A localização de destino deve ser diferente da origem.'
-    else:
-        erros['tipo'] = 'Tipo de movimentação inválido.'
 
 
 def _validar_seriais(mov, seriais, novos_seriais, erros):
@@ -104,11 +89,22 @@ def _validar_seriais(mov, seriais, novos_seriais, erros):
         erros['numeros_serie'] = 'Há números de série duplicados selecionados.'
         return
 
+    qtd = _to_decimal_qtd(mov.quantidade)
+    if qtd is None or qtd <= QTD_ZERO:
+        return
+
+    if qtd != qtd.to_integral_value():
+        erros['quantidade'] = (
+            'Produtos que controlam número de série exigem quantidade inteira exata.'
+        )
+        return
+
+    qtd_int = int(qtd)
     total_seriais = len(seriais) + len(novos_normalizados)
-    if not mov.quantidade or total_seriais != mov.quantidade:
+    if total_seriais != qtd_int:
         erros['numeros_serie'] = (
-            f'Produto controla número de série: informe exatamente {mov.quantidade or 0} serial(is) '
-            f'(recebido: {total_seriais}).'
+            f'Produto "{produto.nome}" controla número de série: informe exatamente '
+            f'{qtd_int} serial(is) (recebido: {total_seriais}).'
         )
         return
 
@@ -127,77 +123,53 @@ def _validar_seriais(mov, seriais, novos_seriais, erros):
                     f'(status atual: {serial.get_status_display()}).'
                 )
                 return
-            if (
-                mov.localizacao_origem_id
-                and serial.localizacao_estoque_id != mov.localizacao_origem_id
-            ):
-                erros['numeros_serie'] = (
-                    f'O serial {serial.numero_serie} não está alocado na localização de origem informada.'
-                )
-                return
 
 
-def validar_movimentacao(mov, seriais=None, novos_seriais=None, verificar_saldo=True):
-    """Valida regras estruturais, saldo em origem e números de série de uma movimentação."""
+def validar_movimentacao(
+    mov,
+    seriais=None,
+    novos_seriais=None,
+    verificar_saldo=True,
+    permitir_saldo_negativo=False,
+):
+    """Valida regras estruturais, saldo único e números de série de uma movimentação."""
     erros = {}
-    _validar_regras_localizacao_e_motivo(mov, erros)
+    _validar_regras_gerais(mov, erros)
     _validar_seriais(mov, seriais, novos_seriais, erros)
 
     if (
         verificar_saldo
+        and not permitir_saldo_negativo
         and not erros
         and mov.produto_id
-        and mov.localizacao_origem_id
-        and mov.tipo in (TIPOS_SAIDA | {'TRANSFERENCIA'})
+        and mov.tipo in TIPOS_SAIDA
+        and not mov.produto.controla_numero_serie
     ):
-        _, saldo_origem = _obter_saldo_localizacao(mov.produto, mov.localizacao_origem, lock=False)
-        if saldo_origem < mov.quantidade:
+        saldo_atual = mov.produto.estoque_atual or QTD_ZERO
+        if saldo_atual < mov.quantidade:
             erros['quantidade'] = (
-                f'Saldo insuficiente na localização {mov.localizacao_origem.codigo}: '
-                f'disponível {saldo_origem}, solicitado {mov.quantidade}.'
+                f'Saldo insuficiente para "{mov.produto.nome}": '
+                f'disponível {saldo_atual}, solicitado {mov.quantidade}.'
             )
 
     if erros:
         raise ValidationError(erros)
 
 
-def _atualizar_saldo_localizacao(produto, localizacao, delta):
-    saldo_obj, saldo_anterior = _obter_saldo_localizacao(produto, localizacao, lock=True)
-    saldo_posterior = saldo_anterior + delta
-    if saldo_posterior < 0:
-        raise ValidationError({
-            'quantidade': (
-                f'Saldo insuficiente na localização {localizacao.codigo}: '
-                f'disponível {saldo_anterior}, alteração solicitada {delta}.'
-            )
-        })
-    if saldo_obj is None:
-        saldo_obj = EstoqueLocalizacao.objects.create(
-            produto=produto,
-            localizacao=localizacao,
-            quantidade=saldo_posterior,
-        )
-    else:
-        saldo_obj.quantidade = saldo_posterior
-        saldo_obj.save(update_fields=['quantidade', 'data_hora_atualizada'])
-    return saldo_anterior, saldo_posterior
-
-
 def _processar_seriais_movimentacao(mov, seriais, novos_normalizados):
     seriais_finais = []
 
     if mov.tipo in TIPOS_ENTRADA:
+        fornecedor = (
+            mov.pessoa
+            if mov.tipo == 'ENTRADA' and mov.origem != 'ESTORNO' and mov.pessoa and mov.pessoa.tipo_pessoa in (1, 2)
+            else None
+        )
         for codigo in novos_normalizados:
-            fornecedor = (
-                mov.pessoa
-                if mov.tipo == 'ENTRADA' and mov.pessoa and mov.pessoa.tipo_pessoa in (1, 2)
-                else None
-            )
             serial = NumeroSerie(
                 produto=mov.produto,
                 numero_serie=codigo,
                 status='DISPONIVEL',
-                localizacao_estoque=mov.localizacao_destino,
                 fornecedor=fornecedor,
                 nota_fiscal_entrada=mov.documento_referencia if mov.tipo == 'ENTRADA' else None,
             )
@@ -207,18 +179,16 @@ def _processar_seriais_movimentacao(mov, seriais, novos_normalizados):
 
         for serial in seriais:
             serial.status = 'DISPONIVEL'
-            serial.localizacao_estoque = mov.localizacao_destino
-            if mov.tipo == 'ENTRADA' and mov.pessoa and mov.pessoa.tipo_pessoa in (1, 2) and not serial.fornecedor_id:
-                serial.fornecedor = mov.pessoa
-            if mov.tipo == 'ENTRADA' and mov.documento_referencia and not serial.nota_fiscal_entrada:
-                serial.nota_fiscal_entrada = mov.documento_referencia
-            serial._skip_sync_estoque = True
-            serial.save()
-            seriais_finais.append(serial)
-
-    elif mov.tipo == 'TRANSFERENCIA':
-        for serial in seriais:
-            serial.localizacao_estoque = mov.localizacao_destino
+            if mov.origem == 'ESTORNO':
+                serial.cliente = None
+                serial.nota_fiscal_saida = None
+                serial.data_venda = None
+                serial.data_fim_garantia = None
+            else:
+                if fornecedor and not serial.fornecedor_id:
+                    serial.fornecedor = fornecedor
+                if mov.tipo == 'ENTRADA' and mov.documento_referencia and not serial.nota_fiscal_entrada:
+                    serial.nota_fiscal_entrada = mov.documento_referencia
             serial._skip_sync_estoque = True
             serial.save()
             seriais_finais.append(serial)
@@ -226,7 +196,6 @@ def _processar_seriais_movimentacao(mov, seriais, novos_normalizados):
     elif mov.tipo in TIPOS_SAIDA:
         agora = timezone.now()
         for serial in seriais:
-            serial.localizacao_estoque = None
             if mov.tipo == 'SAIDA':
                 serial.status = 'VENDIDO'
                 if mov.pessoa and mov.pessoa.tipo_pessoa in (0, 2):
@@ -254,45 +223,41 @@ def _processar_seriais_movimentacao(mov, seriais, novos_normalizados):
 
 
 @transaction.atomic
-def aplicar_movimentacao(mov, seriais=None, novos_seriais=None):
-    """Aplica validando com lock transacional e preenche os snapshots na movimentação."""
+def aplicar_movimentacao(
+    mov,
+    seriais=None,
+    novos_seriais=None,
+    permitir_saldo_negativo=False,
+):
+    """Aplica movimentação com lock transacional no produto e grava snapshots de saldo."""
     produto = Produtos.objects.select_for_update().get(pk=mov.produto_id)
     mov.produto = produto
 
     seriais = list(seriais or [])
     novos_normalizados = normalizar_lista_novos_seriais(novos_seriais)
-    validar_movimentacao(mov, seriais=seriais, novos_seriais=novos_normalizados, verificar_saldo=False)
+    validar_movimentacao(
+        mov,
+        seriais=seriais,
+        novos_seriais=novos_normalizados,
+        verificar_saldo=True,
+        permitir_saldo_negativo=permitir_saldo_negativo,
+    )
 
-    mov.saldo_anterior_produto = produto.estoque_atual
+    saldo_anterior = _to_decimal_qtd(produto.estoque_atual) or QTD_ZERO
+    mov.saldo_anterior_produto = saldo_anterior
 
-    if mov.tipo in TIPOS_ENTRADA:
-        ant_dest, pos_dest = _atualizar_saldo_localizacao(produto, mov.localizacao_destino, mov.quantidade)
-        mov.saldo_anterior_destino = ant_dest
-        mov.saldo_posterior_destino = pos_dest
-        mov.saldo_anterior_origem = None
-        mov.saldo_posterior_origem = None
-    elif mov.tipo in TIPOS_SAIDA:
-        ant_orig, pos_orig = _atualizar_saldo_localizacao(produto, mov.localizacao_origem, -mov.quantidade)
-        mov.saldo_anterior_origem = ant_orig
-        mov.saldo_posterior_origem = pos_orig
-        mov.saldo_anterior_destino = None
-        mov.saldo_posterior_destino = None
-    elif mov.tipo == 'TRANSFERENCIA':
-        ant_orig, pos_orig = _atualizar_saldo_localizacao(produto, mov.localizacao_origem, -mov.quantidade)
-        ant_dest, pos_dest = _atualizar_saldo_localizacao(produto, mov.localizacao_destino, mov.quantidade)
-        mov.saldo_anterior_origem = ant_orig
-        mov.saldo_posterior_origem = pos_orig
-        mov.saldo_anterior_destino = ant_dest
-        mov.saldo_posterior_destino = pos_dest
-
-    seriais_finais = _processar_seriais_movimentacao(mov, seriais, novos_normalizados) if produto.controla_numero_serie else []
+    seriais_finais = (
+        _processar_seriais_movimentacao(mov, seriais, novos_normalizados)
+        if produto.controla_numero_serie
+        else []
+    )
 
     if produto.controla_numero_serie:
-        novo_total = produto.numeros_serie.filter(status='DISPONIVEL').count()
+        qtd_disp = produto.numeros_serie.filter(status='DISPONIVEL').count()
+        novo_total = Decimal(qtd_disp).quantize(Decimal('0.001'))
     else:
-        novo_total = EstoqueLocalizacao.objects.filter(produto=produto).aggregate(
-            total=Coalesce(Sum('quantidade'), 0)
-        )['total']
+        delta = mov.quantidade if mov.tipo in TIPOS_ENTRADA else -mov.quantidade
+        novo_total = (saldo_anterior + delta).quantize(Decimal('0.001'))
 
     produto.estoque_atual = novo_total
     produto.save(update_fields=['estoque_atual'])
@@ -309,23 +274,26 @@ def registrar_movimentacao(
     produto,
     tipo,
     quantidade,
-    localizacao_origem=None,
-    localizacao_destino=None,
+    origem='MANUAL',
+    venda=None,
+    ordem_servico=None,
     numeros_serie=None,
     numeros_serie_novos=None,
     pessoa=None,
     documento_referencia=None,
     motivo=None,
     observacoes=None,
+    permitir_saldo_negativo=False,
     usuario=None,
 ):
-    """Cria e aplica atomicamente uma movimentação de estoque completa com seriais."""
+    """Cria e aplica atomicamente uma movimentação do estoque único."""
     mov = MovimentacaoEstoque(
         produto=produto,
         tipo=tipo,
+        origem=origem,
         quantidade=quantidade,
-        localizacao_origem=localizacao_origem,
-        localizacao_destino=localizacao_destino,
+        venda=venda,
+        ordem_servico=ordem_servico,
         pessoa=pessoa,
         documento_referencia=documento_referencia,
         motivo=motivo,
@@ -336,8 +304,111 @@ def registrar_movimentacao(
         mov,
         seriais=numeros_serie,
         novos_seriais=numeros_serie_novos,
+        permitir_saldo_negativo=permitir_saldo_negativo,
     )
     mov.save()
     if seriais_finais:
         mov.numeros_serie.set(seriais_finais)
     return mov
+
+
+@transaction.atomic
+def baixar_estoque_itens(
+    *,
+    origem,
+    itens,
+    pessoa=None,
+    documento_referencia=None,
+    venda=None,
+    ordem_servico=None,
+    usuario=None,
+):
+    """
+    Executa a baixa automática de saída dos itens elegíveis de uma Venda ou OS.
+    Garante idempotência via `item.movimentacao_saida`.
+    """
+    permitir_negativo = not empresa_bloqueia_sem_estoque()
+    movs_criadas = []
+
+    for item in itens:
+        if getattr(item, 'movimentacao_saida_id', None):
+            continue
+        if not getattr(item, 'produto_id', None):
+            continue
+        if getattr(item, 'tipo_item', 'PECA') != 'PECA':
+            continue
+
+        produto = item.produto
+        if not produto.controla_estoque:
+            continue
+
+        qtd = _to_decimal_qtd(item.quantidade)
+        if qtd is None or qtd <= QTD_ZERO:
+            continue
+
+        seriais = list(item.numeros_serie.all())
+        mov = registrar_movimentacao(
+            produto=produto,
+            tipo='SAIDA',
+            origem=origem,
+            quantidade=qtd,
+            venda=venda,
+            ordem_servico=ordem_servico,
+            numeros_serie=seriais,
+            pessoa=pessoa,
+            documento_referencia=documento_referencia,
+            motivo=f'Baixa automática ({origem}) {documento_referencia or ""}'.strip(),
+            permitir_saldo_negativo=permitir_negativo,
+            usuario=usuario,
+        )
+        item.movimentacao_saida = mov
+        item.save(update_fields=['movimentacao_saida'])
+        movs_criadas.append(mov)
+
+    return movs_criadas
+
+
+@transaction.atomic
+def estornar_estoque_itens(
+    *,
+    itens,
+    motivo_estorno,
+    pessoa=None,
+    documento_referencia=None,
+    venda=None,
+    ordem_servico=None,
+    usuario=None,
+):
+    """
+    Gera movimentações inversas de ENTRADA (origem='ESTORNO') ao reabrir Venda/OS,
+    devolvendo o saldo e restaurando eventuais números de série para DISPONIVEL.
+    """
+    movs_estorno = []
+
+    for item in itens:
+        if not getattr(item, 'movimentacao_saida_id', None):
+            continue
+
+        mov_saida = item.movimentacao_saida
+        seriais = list(mov_saida.numeros_serie.all())
+
+        mov_inv = registrar_movimentacao(
+            produto=mov_saida.produto,
+            tipo='ENTRADA',
+            origem='ESTORNO',
+            quantidade=mov_saida.quantidade,
+            venda=venda,
+            ordem_servico=ordem_servico,
+            numeros_serie=seriais,
+            pessoa=pessoa,
+            documento_referencia=documento_referencia,
+            motivo=motivo_estorno,
+            observacoes=f'Estorno da movimentação de saída #{mov_saida.id}',
+            permitir_saldo_negativo=True,
+            usuario=usuario,
+        )
+        item.movimentacao_saida = None
+        item.save(update_fields=['movimentacao_saida'])
+        movs_estorno.append(mov_inv)
+
+    return movs_estorno

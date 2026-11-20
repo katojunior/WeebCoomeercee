@@ -3,12 +3,15 @@ import datetime
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from django.urls import reverse
 from django.utils import timezone
 
 from cadastro.models import Empresa, Pessoas
+from financeiro.utils import money
 
 
 def _parse_date(val):
@@ -369,3 +372,185 @@ def exportar_resumo_csv(dados):
     writer.writerow(['TOTAIS', '', '', '', '', '', '', '', '', 'Ordens de Serviço:', f"{dados['total_os']:.2f}".replace('.', ','), f"{dados['em_aberto_os']:.2f}".replace('.', ',')])
     writer.writerow(['TOTAIS', '', '', '', '', '', '', '', '', 'TOTAL GERAL:', f"{dados['total_geral']:.2f}".replace('.', ','), f"{dados['em_aberto_geral']:.2f}".replace('.', ',')])
     return response
+
+
+def preparar_lote_finalizacao(dados):
+    """
+    Filtra os registros do relatório que estão aptos para finalização em lote
+    (`finalizada=False` e `status != 'CANCELADO'`) e valida a unicidade do cliente.
+    """
+    elegiveis = []
+    ignorados = []
+    for r in dados['registros']:
+        obj = r['obj']
+        if obj.finalizada or obj.status == 'CANCELADO':
+            ignorados.append(r)
+        else:
+            if r['tipo'] == 'VENDA':
+                obj.calcular_totais()
+            else:
+                obj.recalcular_totais(salvar=False)
+            r['valor_total'] = obj.valor_total or Decimal('0.00')
+            elegiveis.append(r)
+
+    clientes_ids = {r['obj'].cliente_id for r in elegiveis}
+    clientes_distintos = len(clientes_ids)
+    cliente_lote = None
+    sem_cliente = False
+    erro_cliente = None
+
+    if not elegiveis:
+        erro_cliente = 'Nenhum documento em aberto (não finalizado e não cancelado) foi encontrado para finalizar.'
+    elif clientes_distintos > 1:
+        erro_cliente = (
+            'A finalização em lote exige que todos os documentos selecionados pertençam ao mesmo Cliente. '
+            'Filtre por um cliente específico ou desmarque registros de clientes diferentes.'
+        )
+    else:
+        cid = next(iter(clientes_ids))
+        if cid is None:
+            sem_cliente = True
+        else:
+            cliente_lote = Pessoas.objects.filter(pk=cid).first()
+
+    total_lote = sum((r['valor_total'] for r in elegiveis), Decimal('0.00'))
+
+    return {
+        'elegiveis': elegiveis,
+        'ignorados': ignorados,
+        'cliente_lote': cliente_lote,
+        'sem_cliente': sem_cliente,
+        'erro_cliente': erro_cliente,
+        'qtd_vendas': sum(1 for r in elegiveis if r['tipo'] == 'VENDA'),
+        'qtd_os': sum(1 for r in elegiveis if r['tipo'] == 'OS'),
+        'qtd_total': len(elegiveis),
+        'total_lote': total_lote,
+    }
+
+
+def _distribuir_desconto_proporcional(elegiveis, desconto_lote):
+    """
+    Calcula o desconto adicional proporcional a aplicar em cada documento elegível,
+    garantindo que a soma exata dos descontos distribuídos feche com `desconto_lote`.
+    """
+    desc_total = money(desconto_lote or Decimal('0.00'))
+    if desc_total <= Decimal('0.00'):
+        return {r['chave']: Decimal('0.00') for r in elegiveis}
+
+    positivos = [r for r in elegiveis if r['valor_total'] > Decimal('0.00')]
+    base_total = sum((r['valor_total'] for r in positivos), Decimal('0.00'))
+    if base_total <= Decimal('0.00'):
+        return {r['chave']: Decimal('0.00') for r in elegiveis}
+
+    if desc_total > base_total:
+        desc_total = base_total
+
+    alocados = {r['chave']: Decimal('0.00') for r in elegiveis}
+    soma_parcial = Decimal('0.00')
+
+    for idx, r in enumerate(positivos):
+        if idx == len(positivos) - 1:
+            parcela_desc = money(desc_total - soma_parcial)
+        else:
+            parcela_desc = money((desc_total * r['valor_total']) / base_total)
+        parcela_desc = min(parcela_desc, r['valor_total'])
+        alocados[r['chave']] = parcela_desc
+        soma_parcial += parcela_desc
+
+    # Caso o último tenha sido limitado pelo próprio valor_total, redistribui eventual resíduo
+    residuo = money(desc_total - soma_parcial)
+    if residuo > Decimal('0.00'):
+        for r in positivos:
+            margem = r['valor_total'] - alocados[r['chave']]
+            if margem > Decimal('0.00'):
+                add = min(margem, residuo)
+                alocados[r['chave']] += add
+                residuo -= add
+                if residuo <= Decimal('0.00'):
+                    break
+
+    return alocados
+
+
+def executar_finalizacao_em_lote(
+    lote,
+    *,
+    condicao_pagamento,
+    numero_parcelas=1,
+    intervalo_dias=30,
+    data_primeiro_vencimento=None,
+    conta_destino=None,
+    desconto_lote=Decimal('0.00'),
+    quitada=True,
+    usuario=None,
+):
+    """
+    Finaliza em transação atômica todas as Vendas e OS elegíveis do lote,
+    aplicando eventual desconto proporcional e gerando os títulos individuais no Contas a Receber.
+    """
+    if lote['erro_cliente']:
+        raise ValidationError(lote['erro_cliente'])
+
+    elegiveis = lote['elegiveis']
+    if not elegiveis:
+        raise ValidationError('Nenhum documento apto para finalização em lote.')
+
+    if lote['sem_cliente'] and not quitada:
+        raise ValidationError(
+            'Vendas sem Cliente identificado (Consumidor / Balcão) só podem ser finalizadas em lote como Quitadas.'
+        )
+
+    desc_lote = money(desconto_lote or Decimal('0.00'))
+    if desc_lote > lote['total_lote']:
+        raise ValidationError('O desconto do lote não pode ser maior que o valor total dos documentos.')
+
+    usuario_nome = usuario.username if hasattr(usuario, 'username') else (str(usuario) if usuario else None)
+    descontos_extras = _distribuir_desconto_proporcional(elegiveis, desc_lote)
+    titulos_criados = []
+    chaves_finalizadas = []
+    total_finalizado = Decimal('0.00')
+
+    with transaction.atomic():
+        for r in elegiveis:
+            obj = r['obj']
+            extra = descontos_extras.get(r['chave'], Decimal('0.00'))
+            novo_desconto = (obj.desconto or Decimal('0.00')) + extra if extra > Decimal('0.00') else None
+
+            if r['tipo'] == 'VENDA':
+                titulos = obj.finalizar_venda(
+                    condicao_pagamento=condicao_pagamento,
+                    numero_parcelas=numero_parcelas,
+                    intervalo_dias=intervalo_dias,
+                    data_primeiro_vencimento=data_primeiro_vencimento,
+                    conta_destino=conta_destino,
+                    desconto=novo_desconto,
+                    quitada=quitada,
+                    usuario=usuario_nome,
+                )
+            else:
+                titulos = obj.finalizar_os(
+                    condicao_pagamento=condicao_pagamento,
+                    numero_parcelas=numero_parcelas,
+                    intervalo_dias=intervalo_dias,
+                    data_primeiro_vencimento=data_primeiro_vencimento,
+                    conta_destino=conta_destino,
+                    desconto=novo_desconto,
+                    quitada=quitada,
+                    usuario=usuario_nome,
+                )
+
+            titulos_criados.extend(titulos)
+            chaves_finalizadas.append(r['chave'])
+            total_finalizado += obj.valor_total or Decimal('0.00')
+
+    return {
+        'chaves_finalizadas': chaves_finalizadas,
+        'qtd_vendas': lote['qtd_vendas'],
+        'qtd_os': lote['qtd_os'],
+        'qtd_docs': len(chaves_finalizadas),
+        'qtd_titulos': len(titulos_criados),
+        'titulos': titulos_criados,
+        'desconto_aplicado': desc_lote,
+        'total_finalizado': total_finalizado,
+        'quitada': quitada,
+    }

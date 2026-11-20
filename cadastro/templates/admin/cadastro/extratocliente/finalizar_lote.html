@@ -1,0 +1,638 @@
+{% extends "admin/base_site.html" %}
+{% load i18n static %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+    .fin-container {
+        max-width: 1020px;
+        margin: 20px auto;
+        background: var(--body-bg, #fff);
+        border: 1px solid var(--hairline-color, #ddd);
+        border-radius: 8px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+        overflow: hidden;
+    }
+    .fin-header {
+        background: #1e293b;
+        color: #fff;
+        padding: 18px 24px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .fin-header h2 {
+        margin: 0;
+        font-size: 18px;
+        color: #fff;
+    }
+    .fin-body {
+        padding: 24px;
+    }
+    .fin-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 12px;
+        margin-bottom: 20px;
+        background: var(--darkened-bg, #f8fafc);
+        padding: 16px;
+        border-radius: 6px;
+        border: 1px solid var(--hairline-color, #e2e8f0);
+    }
+    .fin-summary-box {
+        display: flex;
+        flex-direction: column;
+    }
+    .fin-summary-box span.label {
+        font-size: 11px;
+        text-transform: uppercase;
+        color: var(--body-quiet-color, #64748b);
+        font-weight: 600;
+    }
+    .fin-summary-box span.value {
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--body-fg, #0f172a);
+        margin-top: 4px;
+    }
+    .fin-summary-box span.value.highlight {
+        color: #16a34a;
+        font-size: 20px;
+    }
+    .fin-form-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+        margin-bottom: 20px;
+    }
+    .fin-field {
+        display: flex;
+        flex-direction: column;
+    }
+    .fin-field label {
+        font-weight: 600;
+        margin-bottom: 6px;
+        font-size: 13px;
+    }
+    .fin-field input, .fin-field select {
+        height: 40px !important;
+        min-height: 40px !important;
+        line-height: 1.4 !important;
+        padding: 6px 12px !important;
+        border: 1px solid var(--border-color, #cbd5e1);
+        border-radius: 5px;
+        font-size: 14px;
+        background-color: var(--body-bg, #fff);
+        color: var(--body-fg, #111);
+        box-sizing: border-box;
+        width: 100%;
+    }
+    .quitada-cards {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+        margin-bottom: 20px;
+    }
+    .quitada-card {
+        border: 2px solid var(--border-color, #cbd5e1);
+        border-radius: 8px;
+        padding: 14px 16px;
+        cursor: pointer;
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        transition: all 0.15s ease;
+    }
+    .quitada-card.active-pago {
+        border-color: #16a34a;
+        background: rgba(22, 163, 74, 0.08);
+    }
+    .quitada-card.active-aberto {
+        border-color: #d97706;
+        background: rgba(217, 119, 6, 0.08);
+    }
+    .quitada-card input[type="radio"] {
+        margin-top: 3px;
+    }
+    .quitada-card .card-title {
+        font-weight: 700;
+        font-size: 14px;
+        display: block;
+    }
+    .quitada-card .card-desc {
+        font-size: 12px;
+        color: var(--body-quiet-color, #64748b);
+        margin-top: 3px;
+        display: block;
+    }
+    .preview-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 8px;
+        margin-bottom: 18px;
+        font-size: 13px;
+    }
+    .preview-table th, .preview-table td {
+        border: 1px solid var(--hairline-color, #e2e8f0);
+        padding: 8px 10px;
+        text-align: left;
+    }
+    .preview-table th {
+        background: var(--darkened-bg, #f1f5f9);
+        font-weight: 600;
+    }
+    .text-right { text-align: right !important; }
+    .badge-pago {
+        background: #dcfce7;
+        color: #166534;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 11px;
+    }
+    .badge-aberto {
+        background: #fef3c7;
+        color: #92400e;
+        padding: 3px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        font-size: 11px;
+    }
+    .alert-box {
+        padding: 12px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 16px;
+    }
+    .alert-error {
+        background: #fef2f2;
+        border: 1px solid #f87171;
+        color: #991b1b;
+    }
+    .alert-warn {
+        background: #fffbeb;
+        border: 1px solid #fcd34d;
+        color: #92400e;
+    }
+    .alert-success {
+        background: rgba(22, 163, 74, 0.12);
+        border: 2px solid #16a34a;
+        color: var(--body-fg, #14532d);
+        padding: 18px 20px;
+    }
+    .fin-actions {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: 10px;
+        margin-top: 24px;
+        padding-top: 16px;
+        border-top: 1px solid var(--hairline-color, #e2e8f0);
+    }
+    .btn-cancel {
+        padding: 10px 18px;
+        border-radius: 5px;
+        border: 1px solid #94a3b8;
+        color: var(--body-fg, #334155);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .btn-blue {
+        padding: 10px 18px;
+        border-radius: 5px;
+        background: #2563eb;
+        color: #fff;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 13px;
+    }
+    .btn-confirm {
+        padding: 10px 22px;
+        border-radius: 5px;
+        border: none;
+        background: #16a34a;
+        color: #fff;
+        font-weight: 700;
+        font-size: 14px;
+        cursor: pointer;
+        text-decoration: none;
+    }
+    .btn-confirm:hover {
+        background: #15803d;
+        color: #fff;
+    }
+    .btn-confirm:disabled {
+        background: #94a3b8;
+        cursor: not-allowed;
+    }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+    <a href="{% url 'admin:index' %}">Início</a>
+    &rsaquo; <a href="{% url 'admin:app_list' app_label='cadastro' %}">Cadastro</a>
+    &rsaquo; <a href="{{ url_voltar }}">Resumo / Extrato de Cliente</a>
+    &rsaquo; Finalização em Lote
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="fin-container" data-sem-cliente="{% if lote.sem_cliente %}1{% else %}0{% endif %}">
+    <div class="fin-header">
+        <h2>✅ Finalização em Lote de Vendas e Ordens de Serviço</h2>
+        <span>
+            Cliente:
+            <strong>
+                {% if lote.cliente_lote %}
+                    {{ lote.cliente_lote.razao_nome }}
+                {% elif lote.sem_cliente %}
+                    CONSUMIDOR FINAL / BALCÃO
+                {% else %}
+                    —
+                {% endif %}
+            </strong>
+        </span>
+    </div>
+
+    <div class="fin-body">
+        {% if resultado %}
+            <div class="alert-box alert-success">
+                <div style="font-size:16px; margin-bottom:6px;">
+                    ✅ Finalização em lote concluída com sucesso!
+                </div>
+                <div style="font-weight:500;">
+                    Foram finalizados <strong>{{ resultado.qtd_docs }}</strong> documento(s)
+                    ({{ resultado.qtd_vendas }} venda(s) e {{ resultado.qtd_os }} OS(s)),
+                    totalizando <strong>R$ {{ resultado.total_finalizado|floatformat:2 }}</strong>
+                    {% if resultado.desconto_aplicado > 0 %}
+                        (com desconto proporcional de R$ {{ resultado.desconto_aplicado|floatformat:2 }} aplicado)
+                    {% endif %},
+                    gerando <strong>{{ resultado.qtd_titulos }}</strong> título(s) no Contas a Receber como
+                    {% if resultado.quitada %}
+                        <span class="badge-pago">QUITADO (PAGO)</span>
+                    {% else %}
+                        <span class="badge-aberto">EM ABERTO (A RECEBER)</span>
+                    {% endif %}.
+                </div>
+            </div>
+
+            {% if resultado.titulos %}
+            <h3 style="margin: 12px 0 8px 0; font-size: 14px;">Títulos Gerados no Contas a Receber</h3>
+            <table class="preview-table">
+                <thead>
+                    <tr>
+                        <th>Documento</th>
+                        <th>Parcela</th>
+                        <th>Vencimento</th>
+                        <th>Forma Prevista</th>
+                        <th class="text-right">Valor (R$)</th>
+                        <th>Situação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for t in resultado.titulos %}
+                    <tr>
+                        <td><strong>{{ t.numero_documento }}</strong></td>
+                        <td>{{ t.parcela_numero }}/{{ t.parcela_total }}</td>
+                        <td>{{ t.data_vencimento|date:"d/m/Y" }}</td>
+                        <td>{{ t.forma_pagamento_prevista }}</td>
+                        <td class="text-right"><strong>R$ {{ t.valor_original|floatformat:2 }}</strong></td>
+                        <td>
+                            {% if t.status == 'PAGO' %}
+                                <span class="badge-pago">QUITADO</span>
+                            {% else %}
+                                <span class="badge-aberto">{{ t.get_status_display|upper }}</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            <div class="fin-actions">
+                <a href="{{ url_voltar }}" class="btn-cancel">← Voltar para o Resumo / Extrato</a>
+                <a href="{{ url_imprimir_resumo }}" target="_blank" class="btn-blue">🖨️ Imprimir Resumo do Lote</a>
+                <a href="{{ url_imprimir_detalhado }}" target="_blank" class="btn-confirm">🖨️ Imprimir Todos Detalhados</a>
+            </div>
+
+        {% else %}
+            {% if erro_execucao %}
+                <div class="alert-box alert-error">❌ {{ erro_execucao }}</div>
+            {% endif %}
+
+            {% if lote.erro_cliente %}
+                <div class="alert-box alert-error">⚠️ {{ lote.erro_cliente }}</div>
+            {% endif %}
+
+            {% if lote.ignorados %}
+                <div class="alert-box alert-warn">
+                    ℹ️ {{ lote.ignorados|length }} documento(s) já finalizado(s) ou cancelado(s) da seleção foram ignorados automaticamente.
+                </div>
+            {% endif %}
+
+            <div class="fin-summary-grid">
+                <div class="fin-summary-box">
+                    <span class="label">Documentos no Lote</span>
+                    <span class="value">{{ lote.qtd_total }} ({{ lote.qtd_vendas }} Venda / {{ lote.qtd_os }} OS)</span>
+                </div>
+                <div class="fin-summary-box">
+                    <span class="label">Total Bruto do Lote</span>
+                    <span class="value" id="disp-bruto" data-val="{{ lote.total_lote|stringformat:'.2f' }}">R$ {{ lote.total_lote|floatformat:2 }}</span>
+                </div>
+                <div class="fin-summary-box">
+                    <span class="label">Desconto no Lote</span>
+                    <span class="value" id="disp-desc">R$ 0,00</span>
+                </div>
+                <div class="fin-summary-box">
+                    <span class="label">Valor Líquido a Faturar</span>
+                    <span class="value highlight" id="disp-total">R$ {{ lote.total_lote|floatformat:2 }}</span>
+                </div>
+            </div>
+
+            {% if lote.elegiveis %}
+                <h3 style="margin: 0 0 8px 0; font-size: 14px;">Documentos que serão finalizados</h3>
+                <table class="preview-table">
+                    <thead>
+                        <tr>
+                            <th>Tipo</th>
+                            <th>Documento</th>
+                            <th>Data</th>
+                            <th>Resumo / Equipamento / Itens</th>
+                            <th class="text-right">Valor Atual (R$)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in lote.elegiveis %}
+                        <tr class="lote-doc-row" data-doc="{{ r.numero }}" data-val="{{ r.valor_total|stringformat:'.2f' }}">
+                            <td><strong>{{ r.tipo }}</strong></td>
+                            <td><strong>{{ r.numero }}</strong></td>
+                            <td>{{ r.data|date:"d/m/Y H:i" }}</td>
+                            <td>{{ r.resumo }}</td>
+                            <td class="text-right"><strong>R$ {{ r.valor_total|floatformat:2 }}</strong></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+
+            {% if not lote.erro_cliente and lote.elegiveis %}
+            <form method="post" id="form-finalizar-lote">
+                {% csrf_token %}
+                {% for r in lote.elegiveis %}
+                    <input type="hidden" name="sel" value="{{ r.chave }}">
+                {% endfor %}
+
+                {% if lote.sem_cliente %}
+                <div id="alert-sem-cliente" class="alert-box alert-warn" style="display:none;">
+                    ⚠️ Vendas sem Cliente identificado (Consumidor / Balcão) só podem ser finalizadas como <strong>Quitadas</strong>.
+                </div>
+                {% endif %}
+
+                <h3 style="margin: 14px 0 10px 0; font-size: 14px;">1. Situação do Pagamento (Está Quitada?)</h3>
+                <div class="quitada-cards">
+                    <label class="quitada-card" id="card-quitada-sim">
+                        <input type="radio" name="quitada" value="1" checked>
+                        <div>
+                            <span class="card-title">✅ SIM — Já está Quitada (Recebido no ato)</span>
+                            <span class="card-desc">Finaliza cada Venda/OS gerando os títulos já baixados como <strong>QUITADO (PAGO)</strong> no Caixa/Conta.</span>
+                        </div>
+                    </label>
+                    <label class="quitada-card" id="card-quitada-nao">
+                        <input type="radio" name="quitada" value="0">
+                        <div>
+                            <span class="card-title">⏳ NÃO — Deixar em Aberto (A Receber)</span>
+                            <span class="card-desc">Finaliza cada Venda/OS gerando suas parcelas <strong>EM ABERTO</strong> no Contas a Receber.</span>
+                        </div>
+                    </label>
+                </div>
+
+                <h3 style="margin: 18px 0 12px 0; font-size: 14px;">2. Condições Financeiras e Parcelamento</h3>
+                <div class="fin-form-grid">
+                    <div class="fin-field">
+                        <label for="id_condicao_pagamento">Condição / Forma de Pagamento:</label>
+                        <select name="condicao_pagamento" id="id_condicao_pagamento" required>
+                            {% for val, label in condicoes_pagamento %}
+                                <option value="{{ val }}">{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="fin-field">
+                        <label for="id_numero_parcelas">Número de Parcelas (por documento):</label>
+                        <input type="number" name="numero_parcelas" id="id_numero_parcelas" min="1" max="120" value="1" required>
+                    </div>
+
+                    <div class="fin-field">
+                        <label for="id_intervalo_dias">Intervalo entre Parcelas (dias):</label>
+                        <input type="number" name="intervalo_dias" id="id_intervalo_dias" min="0" max="365" value="30" required>
+                    </div>
+
+                    <div class="fin-field">
+                        <label for="id_data_primeiro_vencimento">1º Vencimento / Data do Pagamento:</label>
+                        <input type="date" name="data_primeiro_vencimento" id="id_data_primeiro_vencimento" value="{{ data_vencimento_iso }}" required>
+                    </div>
+
+                    <div class="fin-field">
+                        <label for="id_conta_destino">Conta / Caixa de Recebimento:</label>
+                        <select name="conta_destino" id="id_conta_destino">
+                            <option value="">--- Caixa Geral Padrão ---</option>
+                            {% for conta in contas_bancarias %}
+                                <option value="{{ conta.pk }}">{{ conta }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="fin-field">
+                        <label for="id_desconto_lote">Desconto Geral no Lote (R$ - Proporcional):</label>
+                        <input type="number" step="0.01" min="0" name="desconto_lote" id="id_desconto_lote" value="0.00">
+                    </div>
+                </div>
+
+                <h3 style="margin: 18px 0 8px 0; font-size: 14px;">3. Prévia das Parcelas por Documento no Contas a Receber</h3>
+                <table class="preview-table">
+                    <thead>
+                        <tr>
+                            <th>Documento</th>
+                            <th>Parcela</th>
+                            <th>Vencimento</th>
+                            <th>Forma</th>
+                            <th class="text-right">Valor (R$)</th>
+                            <th>Situação</th>
+                        </tr>
+                    </thead>
+                    <tbody id="preview-parcelas-body"></tbody>
+                </table>
+
+                <div class="fin-actions">
+                    <a href="{{ url_voltar }}" class="btn-cancel">← Voltar para o Resumo</a>
+                    <button type="submit" class="btn-confirm" id="btn-confirm-lote">
+                        ✅ Confirmar Finalização em Lote ({{ lote.qtd_total }} doc(s))
+                    </button>
+                </div>
+            </form>
+            {% else %}
+                <div class="fin-actions">
+                    <a href="{{ url_voltar }}" class="btn-cancel">← Voltar para o Resumo / Extrato</a>
+                </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+
+{% if not resultado and not lote.erro_cliente and lote.elegiveis %}
+<script>
+(function() {
+    var container = document.querySelector('.fin-container');
+    var semCliente = container.getAttribute('data-sem-cliente') === '1';
+    var bruto = parseFloat(document.getElementById('disp-bruto').getAttribute('data-val').replace(',', '.')) || 0;
+    var condSelect = document.getElementById('id_condicao_pagamento');
+    var numInput = document.getElementById('id_numero_parcelas');
+    var intInput = document.getElementById('id_intervalo_dias');
+    var vencInput = document.getElementById('id_data_primeiro_vencimento');
+    var descInput = document.getElementById('id_desconto_lote');
+    var radiosQuitada = document.querySelectorAll('input[name="quitada"]');
+    var cardSim = document.getElementById('card-quitada-sim');
+    var cardNao = document.getElementById('card-quitada-nao');
+    var tbody = document.getElementById('preview-parcelas-body');
+    var dispDesc = document.getElementById('disp-desc');
+    var dispTotal = document.getElementById('disp-total');
+    var alertSemCliente = document.getElementById('alert-sem-cliente');
+    var btnConfirm = document.getElementById('btn-confirm-lote');
+
+    var docs = [];
+    document.querySelectorAll('.lote-doc-row').forEach(function(row) {
+        docs.push({
+            numero: row.getAttribute('data-doc'),
+            valor: parseFloat((row.getAttribute('data-val') || '0').replace(',', '.')) || 0
+        });
+    });
+
+    function formatBRL(v) {
+        return 'R$ ' + v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function isQuitadaSelected() {
+        var checked = document.querySelector('input[name="quitada"]:checked');
+        return checked && checked.value === '1';
+    }
+
+    function syncCards() {
+        var quitada = isQuitadaSelected();
+        if (quitada) {
+            cardSim.classList.add('active-pago');
+            cardNao.classList.remove('active-aberto');
+            if (alertSemCliente) alertSemCliente.style.display = 'none';
+            btnConfirm.disabled = false;
+        } else {
+            cardSim.classList.remove('active-pago');
+            cardNao.classList.add('active-aberto');
+            if (semCliente) {
+                if (alertSemCliente) alertSemCliente.style.display = 'block';
+                btnConfirm.disabled = true;
+            } else {
+                if (alertSemCliente) alertSemCliente.style.display = 'none';
+                btnConfirm.disabled = false;
+            }
+        }
+    }
+
+    function renderPreview() {
+        syncCards();
+        var descLote = Math.min(bruto, Math.max(0, parseFloat((descInput.value || '0').replace(',', '.')) || 0));
+        var liquido = Math.max(0, bruto - descLote);
+        dispDesc.textContent = formatBRL(descLote);
+        dispTotal.textContent = formatBRL(liquido);
+
+        var n = Math.max(1, parseInt(numInput.value || '1', 10));
+        var intervalo = Math.max(0, parseInt(intInput.value || '30', 10));
+        var dtBaseStr = vencInput.value;
+        var dtBase = dtBaseStr ? new Date(dtBaseStr + 'T12:00:00') : new Date();
+        var condTexto = condSelect.options[condSelect.selectedIndex] ? condSelect.options[condSelect.selectedIndex].text : '';
+        var quitada = isQuitadaSelected();
+
+        var html = '';
+        var positivos = docs.filter(function(d) { return d.valor > 0; });
+        var somaDesc = 0;
+
+        docs.forEach(function(doc) {
+            var descDoc = 0;
+            if (descLote > 0 && bruto > 0 && doc.valor > 0) {
+                if (positivos.length && doc === positivos[positivos.length - 1]) {
+                    descDoc = Math.min(doc.valor, Math.round((descLote - somaDesc) * 100) / 100);
+                } else {
+                    descDoc = Math.min(doc.valor, Math.round(((descLote * doc.valor) / bruto) * 100) / 100);
+                    somaDesc += descDoc;
+                }
+            }
+            var docLiq = Math.max(0, doc.valor - descDoc);
+            if (docLiq <= 0) {
+                html += '<tr><td><strong>' + doc.numero + '</strong></td><td>—</td><td>—</td><td>' + condTexto + '</td><td class="text-right">R$ 0,00</td><td>Sem valor financeiro</td></tr>';
+                return;
+            }
+
+            var porParcela = Math.round((docLiq / n) * 100) / 100;
+            var ultima = Math.round((docLiq - porParcela * (n - 1)) * 100) / 100;
+
+            for (var i = 0; i < n; i++) {
+                var val = (i === n - 1) ? ultima : porParcela;
+                var d = new Date(dtBase.getTime());
+                d.setDate(d.getDate() + (intervalo * i));
+                var dd = String(d.getDate()).padStart(2, '0');
+                var mm = String(d.getMonth() + 1).padStart(2, '0');
+                var yyyy = d.getFullYear();
+
+                var badge = quitada
+                    ? '<span class="badge-pago">QUITADO (PAGO)</span>'
+                    : '<span class="badge-aberto">EM ABERTO</span>';
+
+                html += '<tr>' +
+                    '<td><strong>' + doc.numero + '</strong></td>' +
+                    '<td>' + (i + 1) + '/' + n + '</td>' +
+                    '<td>' + dd + '/' + mm + '/' + yyyy + '</td>' +
+                    '<td>' + condTexto + '</td>' +
+                    '<td class="text-right"><strong>R$ ' + formatBRL(val).replace('R$ ', '') + '</strong></td>' +
+                    '<td>' + badge + '</td>' +
+                    '</tr>';
+            }
+        });
+
+        tbody.innerHTML = html;
+    }
+
+    condSelect.addEventListener('change', function() {
+        var v = condSelect.value;
+        var n = parseInt(numInput.value || '1', 10);
+        if ((v === 'DINHEIRO' || v === 'PIX' || v === 'CARTAO_DEBITO') && n === 1) {
+            document.querySelector('input[name="quitada"][value="1"]').checked = true;
+        } else if (v === 'BOLETO' || v === 'CREDIARIO' || n > 1) {
+            document.querySelector('input[name="quitada"][value="0"]').checked = true;
+        }
+        renderPreview();
+    });
+
+    numInput.addEventListener('change', function() {
+        var n = parseInt(numInput.value || '1', 10);
+        if (n > 1) {
+            document.querySelector('input[name="quitada"][value="0"]').checked = true;
+        }
+        renderPreview();
+    });
+
+    [numInput, intInput, vencInput, descInput].forEach(function(el) {
+        el.addEventListener('input', renderPreview);
+        el.addEventListener('change', renderPreview);
+    });
+    radiosQuitada.forEach(function(r) {
+        r.addEventListener('change', renderPreview);
+    });
+
+    renderPreview();
+})();
+</script>
+{% endif %}
+{% endblock %}

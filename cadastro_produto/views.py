@@ -4,7 +4,6 @@ from rest_framework import filters, generics
 from cadastro.views import BatchListCreateAPIView
 from .models import (
     Categoria,
-    LocalizacaoEstoque,
     Marca,
     NumeroSerie,
     Produtos,
@@ -12,7 +11,6 @@ from .models import (
 )
 from .serializers import (
     CategoriaSerializer,
-    LocalizacaoEstoqueSerializer,
     MarcaSerializer,
     NumeroSerieSerializer,
     ProdutosSerializer,
@@ -77,25 +75,6 @@ class UnidadeMedidaAPIView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = UnidadeMedidaSerializer
 
 
-class LocalizacoesEstoqueAPIView(BatchListCreateAPIView):
-    """Lista e cria localizações físicas de estoque."""
-
-    queryset = LocalizacaoEstoque.objects.all()
-    serializer_class = LocalizacaoEstoqueSerializer
-    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['ativo', 'setor']
-    search_fields = ['codigo', 'setor', 'descricao']
-    ordering_fields = ['codigo', 'setor', 'data_hora']
-    ordering = ['codigo']
-
-
-class LocalizacaoEstoqueAPIView(generics.RetrieveUpdateDestroyAPIView):
-    """Consulta, atualiza ou remove uma localização física específica."""
-
-    queryset = LocalizacaoEstoque.objects.all()
-    serializer_class = LocalizacaoEstoqueSerializer
-
-
 class ProdutosAPIView(BatchListCreateAPIView):
     """Lista e cria produtos com filtros por atributos e relações."""
 
@@ -106,12 +85,12 @@ class ProdutosAPIView(BatchListCreateAPIView):
         'marca',
         'categoria',
         'unidade_medida',
-        'localizacao_estoque',
         'ncm',
         'cest',
         'cfop',
         'condicao',
         'ativo',
+        'controla_estoque',
         'controla_numero_serie',
         'fornecedor',
     ]
@@ -123,7 +102,6 @@ class ProdutosAPIView(BatchListCreateAPIView):
         'marca__nome',
         'categoria__nome',
         'unidade_medida__sigla',
-        'localizacao_estoque__codigo',
         'ncm__codigo',
         'cest__codigo',
         'cfop__codigo',
@@ -146,7 +124,7 @@ class NumerosSerieAPIView(BatchListCreateAPIView):
     queryset = NumeroSerie.objects.all()
     serializer_class = NumeroSerieSerializer
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['produto', 'status', 'localizacao_estoque', 'fornecedor', 'cliente']
+    filterset_fields = ['produto', 'status', 'fornecedor', 'cliente']
     search_fields = [
         'numero_serie',
         'nota_fiscal_entrada',

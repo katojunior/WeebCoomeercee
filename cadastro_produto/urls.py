@@ -3,8 +3,6 @@ from django.urls import path
 from .views import (
     CategoriaAPIView,
     CategoriasAPIView,
-    LocalizacaoEstoqueAPIView,
-    LocalizacoesEstoqueAPIView,
     MarcaAPIView,
     MarcasAPIView,
     NumeroSerieAPIView,
@@ -25,9 +23,6 @@ urlpatterns = [
 
     path('unidades-medida/', UnidadesMedidaAPIView.as_view(), name='unidades_medida'),
     path('unidades-medida/<int:pk>/', UnidadeMedidaAPIView.as_view(), name='unidade_medida'),
-
-    path('localizacoes-estoque/', LocalizacoesEstoqueAPIView.as_view(), name='localizacoes_estoque'),
-    path('localizacoes-estoque/<int:pk>/', LocalizacaoEstoqueAPIView.as_view(), name='localizacao_estoque'),
 
     path('produtos/', ProdutosAPIView.as_view(), name='produtos'),
     path('produtos/<int:pk>/', ProdutoAPIView.as_view(), name='produto'),

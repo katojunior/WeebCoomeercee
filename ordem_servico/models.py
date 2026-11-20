@@ -220,18 +220,31 @@ class OrdemServico(Base):
         Trava a OS como finalizada.
         """
         from financeiro.models import TituloFinanceiro, BaixaTitulo, CategoriaFinanceira, ContaBancaria
+        from estoque.services import baixar_estoque_itens
 
         if self.titulos_financeiros.exists():
             return list(self.titulos_financeiros.all())
 
         total = self.recalcular_totais(salvar=True)
+        doc_ref = self.numero_nf or f"OS-{self.id:06d}"
+        itens_os = list(self.itens.select_related('produto').prefetch_related('numeros_serie'))
+
         if total <= Decimal('0.00'):
-            self.finalizada = True
-            self.status = 'FINALIZADO'
-            self.data_finalizacao = timezone.now()
-            if not self.data_conclusao:
-                self.data_conclusao = timezone.now()
-            self.save(update_fields=['finalizada', 'status', 'data_finalizacao', 'data_conclusao', 'valor_pecas', 'valor_servicos', 'valor_total'])
+            with transaction.atomic():
+                baixar_estoque_itens(
+                    origem='ORDEM_SERVICO',
+                    itens=itens_os,
+                    pessoa=self.cliente,
+                    documento_referencia=doc_ref,
+                    ordem_servico=self,
+                    usuario=usuario or self.usuario,
+                )
+                self.finalizada = True
+                self.status = 'FINALIZADO'
+                self.data_finalizacao = timezone.now()
+                if not self.data_conclusao:
+                    self.data_conclusao = timezone.now()
+                self.save(update_fields=['finalizada', 'status', 'data_finalizacao', 'data_conclusao', 'valor_pecas', 'valor_servicos', 'valor_total'])
             return []
 
         categoria, _ = CategoriaFinanceira.objects.get_or_create(
@@ -270,6 +283,14 @@ class OrdemServico(Base):
 
         titulos_gerados = []
         with transaction.atomic():
+            baixar_estoque_itens(
+                origem='ORDEM_SERVICO',
+                itens=itens_os,
+                pessoa=self.cliente,
+                documento_referencia=doc_ref,
+                ordem_servico=self,
+                usuario=usuario or self.usuario,
+            )
             for i in range(n):
                 venc = dt_venc + timedelta(days=intervalo * i)
                 val = valores[i]
@@ -375,8 +396,20 @@ class OrdemServico(Base):
         return self.gerar_financeiro(usuario=usuario, quitada=quitada)
 
     def estornar_financeiro(self, usuario=None):
-        """Estorna as parcelas e baixas geradas por esta OS e a reabre."""
+        """Estorna as parcelas/baixas e devolve ao estoque as peças baixadas nesta OS."""
+        from estoque.services import estornar_estoque_itens
+
+        doc_ref = self.numero_nf or f"OS-{self.id:06d}"
         with transaction.atomic():
+            itens_os = list(self.itens.select_related('produto', 'movimentacao_saida'))
+            estornar_estoque_itens(
+                itens=itens_os,
+                motivo_estorno=f"Estorno automático por reabertura da OS #{self.id:06d}",
+                pessoa=self.cliente,
+                documento_referencia=doc_ref,
+                ordem_servico=self,
+                usuario=usuario or self.usuario,
+            )
             self.titulos_financeiros.all().delete()
             self.finalizada = False
             self.data_finalizacao = None
@@ -405,6 +438,20 @@ class ItemOrdemServico(Base):
         'cadastro_produto.Produtos',
         verbose_name='Produto / Peça / Serviço',
         on_delete=models.RESTRICT,
+        null=True,
+        blank=True,
+        related_name='itens_ordem_servico',
+    )
+    numeros_serie = models.ManyToManyField(
+        'cadastro_produto.NumeroSerie',
+        verbose_name='Números de Série',
+        blank=True,
+        related_name='itens_ordem_servico',
+    )
+    movimentacao_saida = models.ForeignKey(
+        'estoque.MovimentacaoEstoque',
+        verbose_name='Movimentação de Estoque (Saída)',
+        on_delete=models.SET_NULL,
         null=True,
         blank=True,
         related_name='itens_ordem_servico',

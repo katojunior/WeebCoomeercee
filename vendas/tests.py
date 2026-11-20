@@ -122,7 +122,7 @@ class VendasTestCase(TestCase):
         venda_admin = admin.site._registry[Venda]
         self.assertIn('cliente__razao_nome', venda_admin.search_fields)
         self.assertIn('status', venda_admin.list_filter)
-        self.assertEqual(len(venda_admin.inlines), 2)
+        self.assertEqual(len(venda_admin.inlines), 3)
 
     def test_gerar_financeiro_avista(self):
         from financeiro.models import ContaBancaria

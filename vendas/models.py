@@ -152,17 +152,30 @@ class Venda(Base):
         """
         from financeiro.models import TituloFinanceiro, BaixaTitulo, CategoriaFinanceira, ContaBancaria
         from cadastro.models import Pessoas
+        from estoque.services import baixar_estoque_itens
 
         if self.titulos_financeiros.exists():
             return list(self.titulos_financeiros.all())
 
         total = self.calcular_totais()
+        doc_ref = self.numero_nf or f"VND-{self.id:06d}"
+        itens_venda = list(self.itens.select_related('produto').prefetch_related('numeros_serie'))
+
         if total <= Decimal('0.00'):
-            self.finalizada = True
-            self.status = 'FINALIZADO'
-            self.data_finalizacao = timezone.now()
-            self.save(update_fields=['finalizada', 'status', 'data_finalizacao', 'subtotal', 'valor_total'])
-            self._atualizar_datas_compra_cliente()
+            with transaction.atomic():
+                baixar_estoque_itens(
+                    origem='VENDA',
+                    itens=itens_venda,
+                    pessoa=self.cliente,
+                    documento_referencia=doc_ref,
+                    venda=self,
+                    usuario=usuario or self.usuario,
+                )
+                self.finalizada = True
+                self.status = 'FINALIZADO'
+                self.data_finalizacao = timezone.now()
+                self.save(update_fields=['finalizada', 'status', 'data_finalizacao', 'subtotal', 'valor_total'])
+                self._atualizar_datas_compra_cliente()
             return []
 
         n = max(1, int(self.numero_parcelas or 1))
@@ -212,6 +225,14 @@ class Venda(Base):
 
         titulos_gerados = []
         with transaction.atomic():
+            baixar_estoque_itens(
+                origem='VENDA',
+                itens=itens_venda,
+                pessoa=self.cliente or cliente,
+                documento_referencia=doc_ref,
+                venda=self,
+                usuario=usuario or self.usuario,
+            )
             for i in range(n):
                 venc = dt_venc + timedelta(days=intervalo * i)
                 val = valores[i]
@@ -319,8 +340,20 @@ class Venda(Base):
         return self.gerar_financeiro(usuario=usuario, quitada=quitada)
 
     def estornar_financeiro(self, usuario=None):
-        """Estorna as parcelas e baixas geradas por esta venda e a reabre."""
+        """Estorna as parcelas/baixas e devolve ao estoque os itens baixados nesta venda."""
+        from estoque.services import estornar_estoque_itens
+
+        doc_ref = self.numero_nf or f"VND-{self.id:06d}"
         with transaction.atomic():
+            itens_venda = list(self.itens.select_related('produto', 'movimentacao_saida'))
+            estornar_estoque_itens(
+                itens=itens_venda,
+                motivo_estorno=f"Estorno automático por reabertura da Venda #{self.id:06d}",
+                pessoa=self.cliente,
+                documento_referencia=doc_ref,
+                venda=self,
+                usuario=usuario or self.usuario,
+            )
             self.titulos_financeiros.all().delete()
             self.finalizada = False
             self.data_finalizacao = None
@@ -341,6 +374,20 @@ class ItemVenda(Base):
         'cadastro_produto.Produtos',
         verbose_name='Produto',
         on_delete=models.RESTRICT,
+        related_name='itens_venda',
+    )
+    numeros_serie = models.ManyToManyField(
+        'cadastro_produto.NumeroSerie',
+        verbose_name='Números de Série',
+        blank=True,
+        related_name='itens_venda',
+    )
+    movimentacao_saida = models.ForeignKey(
+        'estoque.MovimentacaoEstoque',
+        verbose_name='Movimentação de Estoque (Saída)',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name='itens_venda',
     )
     sequencia = models.IntegerField('Sequência / Item', default=1)

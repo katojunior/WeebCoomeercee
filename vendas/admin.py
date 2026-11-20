@@ -13,6 +13,7 @@ from django.utils.safestring import mark_safe
 from cadastro.admin_filters import DateRangeFilter
 from cadastro.models import Pessoas, Empresa
 from cadastro_produto.models import Produtos
+from estoque.models import MovimentacaoEstoque
 from financeiro.models import ContaBancaria, TituloFinanceiro
 from financeiro.utils import CONDICAO_PAGAMENTO_CHOICES
 from .models import Venda, ItemVenda
@@ -47,8 +48,8 @@ class BaseAdmin(admin.ModelAdmin):
 class ItemVendaInline(admin.TabularInline):
     model = ItemVenda
     extra = 0
-    autocomplete_fields = ('produto',)
-    fields = ('sequencia', 'produto', 'quantidade', 'valor_unitario', 'desconto_unitario', 'valor_total')
+    autocomplete_fields = ('produto', 'numeros_serie')
+    fields = ('sequencia', 'produto', 'quantidade', 'valor_unitario', 'desconto_unitario', 'valor_total', 'numeros_serie')
     readonly_fields = ('valor_total',)
 
     def has_add_permission(self, request, obj=None):
@@ -93,6 +94,32 @@ class ParcelaReceberInline(admin.TabularInline):
         return False
 
 
+class MovimentacaoEstoqueVendaInline(admin.TabularInline):
+    """Exibição das movimentações de estoque geradas a partir da Venda."""
+    model = MovimentacaoEstoque
+    extra = 0
+    can_delete = False
+    verbose_name = 'Movimentação de Estoque'
+    verbose_name_plural = 'Movimentações de Estoque (Kardex)'
+    fields = (
+        'data_hora',
+        'tipo',
+        'origem',
+        'produto',
+        'quantidade',
+        'saldo_anterior_produto',
+        'saldo_posterior_produto',
+        'documento_referencia',
+    )
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Venda)
 class VendaAdmin(BaseAdmin):
     list_display = (
@@ -112,7 +139,7 @@ class VendaAdmin(BaseAdmin):
         'numero_nf', 'numero_cupom_fiscal'
     )
     autocomplete_fields = ('cliente',)
-    inlines = [ItemVendaInline, ParcelaReceberInline]
+    inlines = [ItemVendaInline, ParcelaReceberInline, MovimentacaoEstoqueVendaInline]
     actions = ['finalizar_e_faturar_vendas', 'reabrir_e_estornar_vendas']
     readonly_fields = (
         'usuario', 'usuario_atualizou', 'data_hora', 'data_hora_atualizada',
@@ -307,7 +334,7 @@ class VendaAdmin(BaseAdmin):
                     level=messages.SUCCESS,
                 )
             except ValidationError as exc:
-                self.message_user(request, exc.message, level=messages.ERROR)
+                self.message_user(request, '; '.join(exc.messages), level=messages.ERROR)
 
     def get_urls(self):
         urls = super().get_urls()
@@ -427,7 +454,7 @@ class VendaAdmin(BaseAdmin):
                 )
                 return redirect('admin:vendas_venda_change', venda.pk)
             except ValidationError as exc:
-                self.message_user(request, exc.message, level=messages.ERROR)
+                self.message_user(request, '; '.join(exc.messages), level=messages.ERROR)
 
         dt_vencimento = venda.data_primeiro_vencimento or timezone.localdate()
         default_quitada = (
@@ -468,9 +495,17 @@ class VendaAdmin(BaseAdmin):
             return redirect('admin:vendas_venda_finalizar', abertas.first().pk)
         count = 0
         for venda in abertas:
-            venda.gerar_financeiro(usuario=request.user.username)
-            count += 1
-        self.message_user(request, f"{count} Venda(s) finalizada(s) e faturada(s) no Financeiro com sucesso.")
+            try:
+                venda.gerar_financeiro(usuario=request.user.username)
+                count += 1
+            except ValidationError as exc:
+                self.message_user(
+                    request,
+                    f"Venda #{venda.id:06d}: {'; '.join(exc.messages)}",
+                    level=messages.ERROR,
+                )
+        if count:
+            self.message_user(request, f"{count} Venda(s) finalizada(s) e faturada(s) no Financeiro/Estoque com sucesso.")
 
     @admin.action(description="Reabrir e Estornar Financeiro selecionadas (Desbloquear)")
     def reabrir_e_estornar_vendas(self, request, queryset):

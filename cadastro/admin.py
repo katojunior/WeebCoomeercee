@@ -1,13 +1,26 @@
-from decimal import Decimal
-from django.contrib import admin
+from datetime import date
+from decimal import Decimal, InvalidOperation
+from urllib.parse import urlencode
+
+from django.contrib import admin, messages
+from django.core.exceptions import ValidationError
 from django.db.models import Q, Sum
 from django.http import JsonResponse
-from django.shortcuts import render
+from django.shortcuts import redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
 
+from financeiro.models import ContaBancaria
+from financeiro.utils import CONDICAO_PAGAMENTO_CHOICES
+
 from .models import Estado, Cidade, Pessoas, Empresa, ExtratoCliente
-from .relatorios import ORDENACAO_CAMPOS, consultar_resumo_cliente, exportar_resumo_csv
+from .relatorios import (
+    ORDENACAO_CAMPOS,
+    consultar_resumo_cliente,
+    executar_finalizacao_em_lote,
+    exportar_resumo_csv,
+    preparar_lote_finalizacao,
+)
 from ordem_servico.models import EquipamentoCliente, OrdemServico
 from vendas.models import Venda
 from financeiro.models import TituloFinanceiro
@@ -367,6 +380,7 @@ class EmpresaAdmin(BaseAdmin):
         ('Identificação Empresarial e Fiscal', {
             'fields': (
                 ('matriz', 'ativa', 'regime_tributario'),
+                'bloquear_fechamento_sem_estoque',
                 'razao_social',
                 'nome_fantasia',
                 ('cnpj', 'inscricao_estadual', 'inscricao_municipal'),
@@ -464,6 +478,11 @@ class ExtratoClienteAdmin(admin.ModelAdmin):
                 'buscar-clientes/',
                 self.admin_site.admin_view(self.buscar_clientes_view),
                 name='cadastro_extratocliente_buscar_clientes',
+            ),
+            path(
+                'finalizar-lote/',
+                self.admin_site.admin_view(self.finalizar_lote_view),
+                name='cadastro_extratocliente_finalizar_lote',
             ),
         ]
         return custom_urls + urls
@@ -571,6 +590,138 @@ class ExtratoClienteAdmin(admin.ModelAdmin):
             'imprimir_todos': imprimir_todos,
         }
         return render(request, 'admin/cadastro/extratocliente/resumo_cliente.html', context)
+
+    def finalizar_lote_view(self, request):
+        cliente_raw = (request.GET.get('cliente') or '').strip()
+        cliente_id = int(cliente_raw) if cliente_raw.isdigit() else None
+        data_inicio = (request.GET.get('data_inicio') or '').strip()
+        data_fim = (request.GET.get('data_fim') or '').strip()
+        situacao = request.GET.get('situacao') or 'abertos'
+        if situacao not in self.SITUACAO_LABELS:
+            situacao = 'abertos'
+        tipo_doc = request.GET.get('tipo_doc') or 'ambos'
+        if tipo_doc not in ('ambos', 'vendas', 'ordens'):
+            tipo_doc = 'ambos'
+
+        ocultar_raw = request.GET.get('ocultar_cancelados', '1')
+        ocultar_cancelados = ocultar_raw not in ('0', 'false', 'False', '')
+
+        ordenar_por = (request.GET.get('ordenar_por') or 'data').strip()
+        if ordenar_por not in ORDENACAO_CAMPOS:
+            ordenar_por = 'data'
+        direcao = (request.GET.get('direcao') or 'desc').strip().lower()
+        if direcao not in ('asc', 'desc'):
+            direcao = 'desc'
+
+        raw_sel = request.POST.getlist('sel') if request.method == 'POST' else request.GET.getlist('sel')
+        selected_keys = [k.strip() for k in raw_sel if k.strip()]
+
+        params_voltar = request.GET.copy()
+        for key in ('imprimir_todos', 'acao', 'exportar', 'sel'):
+            params_voltar.pop(key, None)
+        qs_voltar = params_voltar.urlencode()
+        url_base = reverse('admin:cadastro_extratocliente_changelist')
+        url_voltar = f'{url_base}?{qs_voltar}' if qs_voltar else url_base
+
+        dados = consultar_resumo_cliente(
+            cliente_id=cliente_id,
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            situacao=situacao,
+            tipo_doc=tipo_doc,
+            ocultar_cancelados=ocultar_cancelados,
+            ordenar_por=ordenar_por,
+            direcao=direcao,
+            selected_keys=selected_keys or None,
+        )
+        lote = preparar_lote_finalizacao(dados)
+
+        resultado = None
+        erro_execucao = None
+        url_imprimir_resumo = ''
+        url_imprimir_detalhado = ''
+
+        if request.method == 'POST':
+            try:
+                quitada = request.POST.get('quitada', '1') == '1'
+                condicao_pagamento = (request.POST.get('condicao_pagamento') or 'DINHEIRO').strip()
+
+                try:
+                    numero_parcelas = int(request.POST.get('numero_parcelas') or 1)
+                except ValueError as exc:
+                    raise ValidationError('Número de parcelas inválido.') from exc
+                if numero_parcelas < 1 or numero_parcelas > 120:
+                    raise ValidationError('Número de parcelas deve estar entre 1 e 120.')
+
+                try:
+                    intervalo_dias = int(request.POST.get('intervalo_dias') or 30)
+                except ValueError as exc:
+                    raise ValidationError('Intervalo entre parcelas inválido.') from exc
+                if intervalo_dias < 0 or intervalo_dias > 365:
+                    raise ValidationError('Intervalo entre parcelas deve estar entre 0 e 365 dias.')
+
+                venc_raw = (request.POST.get('data_primeiro_vencimento') or '').strip()
+                data_primeiro_vencimento = None
+                if venc_raw:
+                    try:
+                        data_primeiro_vencimento = date.fromisoformat(venc_raw)
+                    except ValueError as exc:
+                        raise ValidationError('Data do primeiro vencimento inválida.') from exc
+
+                conta_raw = (request.POST.get('conta_destino') or '').strip()
+                conta_destino = ContaBancaria.objects.filter(pk=int(conta_raw)).first() if conta_raw.isdigit() else None
+
+                desc_raw = (request.POST.get('desconto_lote') or '0').replace(',', '.').strip()
+                try:
+                    desconto_lote = Decimal(desc_raw or '0')
+                except InvalidOperation as exc:
+                    raise ValidationError('Valor de desconto inválido.') from exc
+                if desconto_lote < Decimal('0.00'):
+                    raise ValidationError('O desconto do lote não pode ser negativo.')
+
+                resultado = executar_finalizacao_em_lote(
+                    lote,
+                    condicao_pagamento=condicao_pagamento,
+                    numero_parcelas=numero_parcelas,
+                    intervalo_dias=intervalo_dias,
+                    data_primeiro_vencimento=data_primeiro_vencimento,
+                    conta_destino=conta_destino,
+                    desconto_lote=desconto_lote,
+                    quitada=quitada,
+                    usuario=getattr(request.user, 'username', str(request.user)),
+                )
+
+                params_print = [('situacao', 'todos'), ('ocultar_cancelados', '1')]
+                if lote['cliente_lote']:
+                    params_print.append(('cliente', str(lote['cliente_lote'].pk)))
+                for chave in resultado['chaves_finalizadas']:
+                    params_print.append(('sel', chave))
+
+                url_imprimir_resumo = f"{url_base}?{urlencode(params_print + [('acao', 'imprimir_resumo')])}"
+                url_imprimir_detalhado = f"{url_base}?{urlencode(params_print + [('imprimir_todos', '1')])}"
+                messages.success(
+                    request,
+                    f"{resultado['qtd_docs']} documento(s) finalizado(s) em lote com sucesso.",
+                )
+            except ValidationError as exc:
+                erro_execucao = '; '.join(exc.messages) if hasattr(exc, 'messages') else str(exc)
+                messages.error(request, erro_execucao)
+
+        context = {
+            **self.admin_site.each_context(request),
+            'opts': self.model._meta,
+            'title': 'Finalização em Lote de Vendas e OS',
+            'lote': lote,
+            'condicoes_pagamento': CONDICAO_PAGAMENTO_CHOICES,
+            'contas_bancarias': ContaBancaria.objects.filter(ativo=True).order_by('descricao'),
+            'data_vencimento_iso': date.today().isoformat(),
+            'url_voltar': url_voltar,
+            'resultado': resultado,
+            'erro_execucao': erro_execucao,
+            'url_imprimir_resumo': url_imprimir_resumo,
+            'url_imprimir_detalhado': url_imprimir_detalhado,
+        }
+        return render(request, 'admin/cadastro/extratocliente/finalizar_lote.html', context)
 
 
 

@@ -3,7 +3,6 @@ from rest_framework import serializers
 from cadastro.serializers import BlankToNoneMixin
 from .models import (
     Categoria,
-    LocalizacaoEstoque,
     Marca,
     NumeroSerie,
     Produto,
@@ -70,35 +69,18 @@ class UnidadeMedidaSerializer(serializers.ModelSerializer):
         )
 
 
-class LocalizacaoEstoqueSerializer(serializers.ModelSerializer):
-    """Serializer para localizações físicas e prateleiras do estoque."""
-
-    class Meta:
-        model = LocalizacaoEstoque
-        fields = (
-            'id',
-            'codigo',
-            'setor',
-            'descricao',
-            'ativo',
-            'data_hora',
-            'data_hora_atualizada',
-        )
-
-
 class ProdutosSerializer(BlankToNoneMixin, serializers.ModelSerializer):
     """Serializer completo de produtos com nomes/siglas relacionados em leitura."""
 
     blank_to_none_fields = (
         'codigo_interno', 'unidade_medida', 'ncm', 'cest', 'cfop',
-        'marca', 'categoria', 'localizacao_estoque', 'fornecedor',
+        'marca', 'categoria', 'fornecedor',
     )
     margem_lucro_calculada = serializers.SerializerMethodField(read_only=True)
     fornecedor_nome = serializers.ReadOnlyField(source='fornecedor.razao_nome')
     marca_nome = serializers.ReadOnlyField(source='marca.nome')
     categoria_nome = serializers.SerializerMethodField(read_only=True)
     unidade_medida_sigla = serializers.ReadOnlyField(source='unidade_medida.sigla')
-    localizacao_estoque_codigo = serializers.ReadOnlyField(source='localizacao_estoque.codigo')
     ncm_codigo = serializers.ReadOnlyField(source='ncm.codigo')
     cest_codigo = serializers.ReadOnlyField(source='cest.codigo')
     cfop_codigo = serializers.ReadOnlyField(source='cfop.codigo')
@@ -126,11 +108,10 @@ class ProdutosSerializer(BlankToNoneMixin, serializers.ModelSerializer):
             'preco_promocional',
             'margem_lucro',
             'margem_lucro_calculada',
+            'controla_estoque',
             'estoque_atual',
             'estoque_minimo',
             'estoque_maximo',
-            'localizacao_estoque',
-            'localizacao_estoque_codigo',
             'controla_numero_serie',
             'garantia_meses',
             'fornecedor',
@@ -176,7 +157,6 @@ class NumeroSerieSerializer(serializers.ModelSerializer):
     cliente_nome = serializers.ReadOnlyField(source='cliente.razao_nome')
     esta_em_garantia = serializers.BooleanField(read_only=True)
     status_display = serializers.CharField(source='get_status_display', read_only=True)
-    localizacao_estoque_codigo = serializers.ReadOnlyField(source='localizacao_estoque.codigo')
 
     class Meta:
         model = NumeroSerie
@@ -188,8 +168,6 @@ class NumeroSerieSerializer(serializers.ModelSerializer):
             'numero_serie',
             'status',
             'status_display',
-            'localizacao_estoque',
-            'localizacao_estoque_codigo',
             'fornecedor',
             'fornecedor_nome',
             'nota_fiscal_entrada',

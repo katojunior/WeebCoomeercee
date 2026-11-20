@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import User
 from django.test import RequestFactory, TestCase
@@ -11,7 +13,6 @@ from fiscal.models import Cest, Cfop, Ncm
 from .admin import ProdutosAdmin
 from .models import (
     Categoria,
-    LocalizacaoEstoque,
     Marca,
     NumeroSerie,
     Produto,
@@ -20,8 +21,8 @@ from .models import (
 )
 
 
-class UnidadeMedidaELocalizacaoTestCase(TestCase):
-    """Testa carga inicial da migration de unidades e normalização de localização."""
+class UnidadeMedidaTestCase(TestCase):
+    """Testa carga inicial da migration de unidades e normalização."""
 
     def test_unidades_padrao_populada_por_migration(self):
         siglas = set(UnidadeMedida.objects.values_list('sigla', flat=True))
@@ -30,16 +31,11 @@ class UnidadeMedidaELocalizacaoTestCase(TestCase):
         self.assertTrue(UnidadeMedida.objects.get(sigla='KG').permite_fracionado)
         self.assertFalse(UnidadeMedida.objects.get(sigla='UN').permite_fracionado)
 
-    def test_normalizacao_unidade_e_localizacao(self):
+    def test_normalizacao_unidade(self):
         unidade = UnidadeMedida.objects.create(sigla=' rl ', descricao='Rolo de Cabo')
         self.assertEqual(unidade.sigla, 'RL')
         self.assertEqual(unidade.descricao, 'ROLO DE CABO')
         self.assertEqual(str(unidade), 'RL - ROLO DE CABO')
-
-        loc = LocalizacaoEstoque.objects.create(codigo=' pr-a1 ', setor='depósito')
-        self.assertEqual(loc.codigo, 'PR-A1')
-        self.assertEqual(loc.setor, 'DEPOSITO')
-        self.assertEqual(str(loc), 'PR-A1 (DEPOSITO)')
 
 
 class ProdutosModelTestCase(TestCase):
@@ -55,7 +51,6 @@ class ProdutosModelTestCase(TestCase):
         self.cat_pai = Categoria.objects.create(nome='Hardware')
         self.categoria = Categoria.objects.create(nome='Armazenamento', categoria_pai=self.cat_pai)
         self.unidade = UnidadeMedida.objects.get(sigla='UN')
-        self.localizacao = LocalizacaoEstoque.objects.create(codigo='COR-A-P01', setor='DEPOSITO')
         self.ncm_ssd = Ncm.objects.get(codigo='84717040')
         self.cest_ssd = Cest.objects.get(codigo='2103200')
         self.cfop_venda = Cfop.objects.get(codigo='5102')
@@ -70,12 +65,11 @@ class ProdutosModelTestCase(TestCase):
             part_number='SNV2S/1000G',
             categoria=self.categoria,
             unidade_medida=self.unidade,
-            localizacao_estoque=self.localizacao,
             condicao='NOVO',
             preco_custo=200.00,
             preco_venda=350.00,
-            estoque_atual=25,
-            estoque_minimo=5,
+            estoque_atual=Decimal('25.000'),
+            estoque_minimo=Decimal('5.000'),
             controla_numero_serie=True,
             garantia_meses=36,
             fornecedor=self.fornecedor,
@@ -86,7 +80,6 @@ class ProdutosModelTestCase(TestCase):
         self.assertEqual(produto.marca.nome, 'KINGSTON')
         self.assertEqual(str(produto.categoria), 'HARDWARE > ARMAZENAMENTO')
         self.assertEqual(produto.unidade_medida.sigla, 'UN')
-        self.assertEqual(produto.localizacao_estoque.codigo, 'COR-A-P01')
         self.assertEqual(produto.ncm.codigo, '84717040')
         self.assertEqual(produto.cest.codigo, '2103200')
         self.assertEqual(produto.cfop.codigo, '5102')
@@ -94,8 +87,9 @@ class ProdutosModelTestCase(TestCase):
         # Margem de lucro calculada automaticamente: (350 - 200) / 200 * 100 = 75.0%
         self.assertEqual(float(produto.margem_lucro), 75.0)
         self.assertTrue(produto.controla_numero_serie)
+        self.assertTrue(produto.controla_estoque)
         # Com controla_numero_serie=True sem seriais cadastrados, estoque inicia zerado
-        self.assertEqual(produto.estoque_atual, 0)
+        self.assertEqual(produto.estoque_atual, Decimal('0.000'))
         self.assertEqual(produto.garantia_meses, 36)
         self.assertEqual(produto.fornecedor.razao_nome, 'DISTRIBUIDORA TECH BRASIL')
         self.assertEqual(str(produto), 'SKU-SSD-1TB - SSD NVME 1TB KINGSTON NV2 M.2 2280')
@@ -119,7 +113,7 @@ class ProdutosModelTestCase(TestCase):
 
 
 class ProdutosAPITestCase(APITestCase):
-    """Testa endpoints REST de produtos, categorias, marcas, unidades e localizações."""
+    """Testa endpoints REST de produtos, categorias, marcas e unidades."""
 
     def setUp(self):
         self.user = User.objects.create_user(username='adminuser', password='password123')
@@ -127,7 +121,6 @@ class ProdutosAPITestCase(APITestCase):
         self.marca_logitech = Marca.objects.create(nome='Logitech')
         self.cat_perifericos = Categoria.objects.create(nome='Perifericos')
         self.unidade_un = UnidadeMedida.objects.get(sigla='UN')
-        self.loc_vitrine = LocalizacaoEstoque.objects.create(codigo='VIT-01', setor='VITRINE')
 
     def test_list_and_create_produto_api(self):
         url = reverse('produtos')
@@ -137,10 +130,9 @@ class ProdutosAPITestCase(APITestCase):
             'marca': self.marca_logitech.id,
             'categoria': self.cat_perifericos.id,
             'unidade_medida': self.unidade_un.id,
-            'localizacao_estoque': self.loc_vitrine.id,
             'preco_custo': 80.00,
             'preco_venda': 149.90,
-            'estoque_atual': 15,
+            'estoque_atual': '15.000',
             'controla_numero_serie': True,
             'garantia_meses': 24,
         }
@@ -150,7 +142,6 @@ class ProdutosAPITestCase(APITestCase):
         self.assertEqual(response.data['marca_nome'], 'LOGITECH')
         self.assertEqual(response.data['categoria_nome'], 'PERIFERICOS')
         self.assertEqual(response.data['unidade_medida_sigla'], 'UN')
-        self.assertEqual(response.data['localizacao_estoque_codigo'], 'VIT-01')
 
         # Código interno vazio ("") vira None e unidade_medida omitida recebe 'UN' automaticamente
         res_blank_1 = self.client.post(url, {'nome': 'Cabo HDMI 2m', 'codigo_interno': ''}, format='json')
@@ -164,24 +155,21 @@ class ProdutosAPITestCase(APITestCase):
         self.assertEqual(response_list.status_code, status.HTTP_200_OK)
         self.assertEqual(len(response_list.data), 3)
 
-    def test_filter_produto_by_marca_unidade_e_localizacao(self):
+    def test_filter_produto_by_marca_e_unidade(self):
         marca_redragon = Marca.objects.create(nome='Redragon')
         marca_razer = Marca.objects.create(nome='Razer')
         unidade_kit = UnidadeMedida.objects.get(sigla='KIT')
-        loc_dep = LocalizacaoEstoque.objects.create(codigo='DEP-B2', setor='DEPOSITO')
 
         Produtos.objects.create(
             nome='Kit Teclado e Mouse Redragon',
             marca=marca_redragon,
             unidade_medida=unidade_kit,
-            localizacao_estoque=loc_dep,
             preco_venda=200,
         )
         Produtos.objects.create(
             nome='Mouse Razer Deathadder',
             marca=marca_razer,
             unidade_medida=self.unidade_un,
-            localizacao_estoque=self.loc_vitrine,
             preco_venda=250,
         )
 
@@ -195,11 +183,7 @@ class ProdutosAPITestCase(APITestCase):
         self.assertEqual(len(res_un.data), 1)
         self.assertEqual(res_un.data[0]['unidade_medida_sigla'], 'KIT')
 
-        res_loc = self.client.get(f'{url}?localizacao_estoque={loc_dep.id}')
-        self.assertEqual(len(res_loc.data), 1)
-        self.assertEqual(res_loc.data[0]['localizacao_estoque_codigo'], 'DEP-B2')
-
-    def test_categoria_marca_unidade_e_localizacao_endpoints(self):
+    def test_categoria_marca_e_unidade_endpoints(self):
         res_marca = self.client.post(reverse('marcas'), {'nome': 'Corsair'}, format='json')
         self.assertEqual(res_marca.status_code, status.HTTP_201_CREATED)
         self.assertEqual(res_marca.data['nome'], 'CORSAIR')
@@ -223,15 +207,6 @@ class ProdutosAPITestCase(APITestCase):
         )
         self.assertEqual(res_un_create.status_code, status.HTTP_201_CREATED)
         self.assertEqual(res_un_create.data['sigla'], 'LT')
-
-        res_loc_create = self.client.post(
-            reverse('localizacoes_estoque'),
-            {'codigo': 'rma-01', 'setor': 'assistencia', 'descricao': 'Bancada RMA'},
-            format='json',
-        )
-        self.assertEqual(res_loc_create.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(res_loc_create.data['codigo'], 'RMA-01')
-        self.assertEqual(res_loc_create.data['setor'], 'ASSISTENCIA')
 
 
 class NumeroSerieTestCase(TestCase):

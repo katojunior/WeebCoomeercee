@@ -3,7 +3,6 @@ from django.contrib import admin
 from cadastro.admin import AUDITORIA_FIELDSET, BaseAdmin
 from .models import (
     Categoria,
-    LocalizacaoEstoque,
     Marca,
     NumeroSerie,
     Produtos,
@@ -76,27 +75,6 @@ class UnidadeMedidaAdmin(BaseAdmin):
     )
 
 
-@admin.register(LocalizacaoEstoque)
-class LocalizacaoEstoqueAdmin(BaseAdmin):
-    """Administração de localizações físicas e prateleiras do estoque."""
-
-    list_display = ('id', 'codigo', 'setor', 'descricao', 'ativo')
-    list_filter = ('ativo', 'setor')
-    search_fields = ('codigo', 'setor', 'descricao')
-    list_editable = ('ativo',)
-
-    fieldsets = (
-        ('Identificação da Localização', {
-            'fields': (
-                ('codigo', 'setor'),
-                'descricao',
-                'ativo',
-            )
-        }),
-        AUDITORIA_FIELDSET,
-    )
-
-
 class NumeroSerieInline(admin.TabularInline):
     """Inline para gerenciamento rápido de números de série dentro do produto."""
 
@@ -105,7 +83,6 @@ class NumeroSerieInline(admin.TabularInline):
     fields = (
         'numero_serie',
         'status',
-        'localizacao_estoque',
         'fornecedor',
         'nota_fiscal_entrada',
         'cliente',
@@ -113,7 +90,7 @@ class NumeroSerieInline(admin.TabularInline):
         'data_fim_garantia',
     )
     readonly_fields = ('data_fim_garantia',)
-    autocomplete_fields = ('localizacao_estoque', 'fornecedor', 'cliente')
+    autocomplete_fields = ('fornecedor', 'cliente')
 
 
 @admin.register(Produtos)
@@ -122,21 +99,22 @@ class ProdutosAdmin(BaseAdmin):
 
     list_display = (
         'id', 'codigo_interno', 'nome', 'marca', 'categoria',
-        'unidade_medida', 'preco_venda', 'estoque_atual', 'controla_numero_serie', 'ativo'
+        'unidade_medida', 'preco_venda', 'estoque_atual',
+        'controla_estoque', 'controla_numero_serie', 'ativo'
     )
     list_filter = (
         'ativo', 'marca', 'categoria', 'condicao',
-        'controla_numero_serie', 'unidade_medida', 'localizacao_estoque'
+        'controla_estoque', 'controla_numero_serie', 'unidade_medida'
     )
     search_fields = (
         'nome', 'codigo_interno', 'codigo_barras', 'part_number',
         'marca__nome', 'categoria__nome', 'unidade_medida__sigla',
-        'localizacao_estoque__codigo', 'ncm__codigo', 'cest__codigo', 'cfop__codigo', 'modelo'
+        'ncm__codigo', 'cest__codigo', 'cfop__codigo', 'modelo'
     )
     list_editable = ('preco_venda', 'ativo')
     readonly_fields = ('estoque_atual', 'margem_lucro') + BaseAdmin.readonly_fields
     autocomplete_fields = (
-        'marca', 'categoria', 'unidade_medida', 'localizacao_estoque',
+        'marca', 'categoria', 'unidade_medida',
         'fornecedor', 'ncm', 'cest', 'cfop'
     )
     inlines = [NumeroSerieInline]
@@ -159,8 +137,8 @@ class ProdutosAdmin(BaseAdmin):
         }),
         ('Controle de Estoque', {
             'fields': (
+                'controla_estoque',
                 ('estoque_atual', 'estoque_minimo', 'estoque_maximo'),
-                'localizacao_estoque',
             )
         }),
         ('Informática e Varejo', {
@@ -199,17 +177,17 @@ class NumeroSerieAdmin(BaseAdmin):
     """Administração de rastreamento individual de números de série."""
 
     list_display = (
-        'id', 'numero_serie', 'produto', 'status', 'localizacao_estoque',
+        'id', 'numero_serie', 'produto', 'status',
         'fornecedor', 'cliente', 'data_venda', 'data_fim_garantia', 'garantia_valida'
     )
-    list_filter = ('status', 'localizacao_estoque', 'produto__marca', 'produto__categoria', 'data_venda')
+    list_filter = ('status', 'produto__marca', 'produto__categoria', 'data_venda')
     search_fields = (
         'numero_serie', 'produto__nome', 'produto__codigo_interno',
-        'localizacao_estoque__codigo', 'cliente__razao_nome',
+        'cliente__razao_nome',
         'fornecedor__razao_nome', 'nota_fiscal_entrada', 'nota_fiscal_saida'
     )
     readonly_fields = ('data_entrada', 'data_fim_garantia') + BaseAdmin.readonly_fields
-    autocomplete_fields = ('produto', 'localizacao_estoque', 'fornecedor', 'cliente')
+    autocomplete_fields = ('produto', 'fornecedor', 'cliente')
 
     @admin.display(boolean=True, description='Em Garantia?')
     def garantia_valida(self, obj):
@@ -220,7 +198,7 @@ class NumeroSerieAdmin(BaseAdmin):
             'fields': (
                 'produto',
                 'numero_serie',
-                ('status', 'localizacao_estoque'),
+                'status',
             )
         }),
         ('Entrada / Fornecedor', {

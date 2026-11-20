@@ -1,6 +1,7 @@
 from datetime import date
 from decimal import Decimal
 from django.contrib import admin, messages
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
@@ -12,6 +13,7 @@ from django.utils.safestring import mark_safe
 from cadastro.admin_filters import DateRangeFilter
 from cadastro.models import Pessoas, Empresa
 from cadastro_produto.models import Produtos
+from estoque.models import MovimentacaoEstoque
 from financeiro.models import ContaBancaria, TituloFinanceiro
 from financeiro.utils import CONDICAO_PAGAMENTO_CHOICES
 from .models import EquipamentoCliente, OrdemServico, ItemOrdemServico
@@ -46,8 +48,8 @@ class BaseAdmin(admin.ModelAdmin):
 class ItemOrdemServicoInline(admin.TabularInline):
     model = ItemOrdemServico
     extra = 0
-    autocomplete_fields = ('produto',)
-    fields = ('tipo_item', 'produto', 'descricao_personalizada', 'quantidade', 'valor_unitario', 'valor_total')
+    autocomplete_fields = ('produto', 'numeros_serie')
+    fields = ('tipo_item', 'produto', 'descricao_personalizada', 'quantidade', 'valor_unitario', 'valor_total', 'numeros_serie')
     readonly_fields = ('valor_total',)
 
     def has_add_permission(self, request, obj=None):
@@ -116,6 +118,32 @@ class EquipamentoClienteAdmin(BaseAdmin):
     )
 
 
+class MovimentacaoEstoqueOSInline(admin.TabularInline):
+    """Exibição das movimentações de estoque geradas a partir da OS."""
+    model = MovimentacaoEstoque
+    extra = 0
+    can_delete = False
+    verbose_name = 'Movimentação de Estoque'
+    verbose_name_plural = 'Movimentações de Estoque (Kardex)'
+    fields = (
+        'data_hora',
+        'tipo',
+        'origem',
+        'produto',
+        'quantidade',
+        'saldo_anterior_produto',
+        'saldo_posterior_produto',
+        'documento_referencia',
+    )
+    readonly_fields = fields
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(OrdemServico)
 class OrdemServicoAdmin(BaseAdmin):
     list_display = (
@@ -136,7 +164,7 @@ class OrdemServicoAdmin(BaseAdmin):
         'numero_nf', 'numero_cupom_fiscal'
     )
     autocomplete_fields = ('cliente',)
-    inlines = [ItemOrdemServicoInline, ParcelaReceberInline]
+    inlines = [ItemOrdemServicoInline, ParcelaReceberInline, MovimentacaoEstoqueOSInline]
     actions = ['finalizar_e_faturar_ordens', 'reabrir_e_estornar_ordens']
     readonly_fields = (
         'usuario', 'usuario_atualizou', 'data_hora', 'data_hora_atualizada',
@@ -474,25 +502,28 @@ class OrdemServicoAdmin(BaseAdmin):
             numero_nf = (request.POST.get('numero_nf') or '').strip() or None
             numero_cf = (request.POST.get('numero_cupom_fiscal') or '').strip() or None
 
-            titulos = ordem.finalizar_os(
-                condicao_pagamento=condicao,
-                numero_parcelas=num_parcelas,
-                intervalo_dias=intervalo_dias,
-                data_primeiro_vencimento=dt_venc,
-                conta_destino=conta_obj,
-                desconto=desconto_val,
-                quitada=quitada,
-                numero_nf=numero_nf,
-                numero_cupom_fiscal=numero_cf,
-                usuario=request.user.username if request.user.is_authenticated else None,
-            )
-            situacao_txt = 'QUITADO(S) / PAGO(S)' if quitada else 'EM ABERTO'
-            self.message_user(
-                request,
-                f"OS #{ordem.id:06d} finalizada com sucesso! {len(titulos)} título(s) gerado(s) no Contas a Receber como {situacao_txt}.",
-                level=messages.SUCCESS,
-            )
-            return redirect('admin:ordem_servico_ordemservico_change', ordem.pk)
+            try:
+                titulos = ordem.finalizar_os(
+                    condicao_pagamento=condicao,
+                    numero_parcelas=num_parcelas,
+                    intervalo_dias=intervalo_dias,
+                    data_primeiro_vencimento=dt_venc,
+                    conta_destino=conta_obj,
+                    desconto=desconto_val,
+                    quitada=quitada,
+                    numero_nf=numero_nf,
+                    numero_cupom_fiscal=numero_cf,
+                    usuario=request.user.username if request.user.is_authenticated else None,
+                )
+                situacao_txt = 'QUITADO(S) / PAGO(S)' if quitada else 'EM ABERTO'
+                self.message_user(
+                    request,
+                    f"OS #{ordem.id:06d} finalizada com sucesso! {len(titulos)} título(s) gerado(s) no Contas a Receber como {situacao_txt}.",
+                    level=messages.SUCCESS,
+                )
+                return redirect('admin:ordem_servico_ordemservico_change', ordem.pk)
+            except ValidationError as exc:
+                self.message_user(request, '; '.join(exc.messages), level=messages.ERROR)
 
         dt_vencimento = ordem.data_primeiro_vencimento or timezone.localdate()
         default_quitada = (
@@ -533,9 +564,17 @@ class OrdemServicoAdmin(BaseAdmin):
             return redirect('admin:ordem_servico_ordemservico_finalizar', abertas.first().pk)
         count = 0
         for ordem in abertas:
-            ordem.gerar_financeiro(usuario=request.user.username)
-            count += 1
-        self.message_user(request, f"{count} Ordem(ns) de Serviço finalizada(s) e faturada(s) no Financeiro com sucesso.")
+            try:
+                ordem.gerar_financeiro(usuario=request.user.username)
+                count += 1
+            except ValidationError as exc:
+                self.message_user(
+                    request,
+                    f"OS #{ordem.id:06d}: {'; '.join(exc.messages)}",
+                    level=messages.ERROR,
+                )
+        if count:
+            self.message_user(request, f"{count} Ordem(ns) de Serviço finalizada(s) e faturada(s) no Financeiro/Estoque com sucesso.")
 
     @admin.action(description="Reabrir e Estornar Financeiro selecionadas (Desbloquear)")
     def reabrir_e_estornar_ordens(self, request, queryset):

@@ -712,3 +712,166 @@ class ExtratoClienteAdminTestCase(TestCase):
         csv_text = res_csv_asc.content.decode('utf-8-sig')
         self.assertLess(csv_text.find(f'VND #{self.venda_aberta.id:06d}'), csv_text.find(f'OS #{self.os_aberta.id:06d}'))
 
+    def test_botao_e_preview_finalizacao_em_lote(self):
+        url_resumo = reverse('admin:cadastro_extratocliente_changelist')
+        res_btn = self.client.get(url_resumo, {'cliente': self.cliente1.pk, 'situacao': 'abertos'})
+        self.assertEqual(res_btn.status_code, 200)
+        self.assertContains(res_btn, 'id="btn-finalizar-lote"')
+        self.assertContains(res_btn, 'Finalizar Selecionados em Lote')
+
+        url_lote = reverse('admin:cadastro_extratocliente_finalizar_lote')
+
+        # Seleção mista de clientes diferentes deve bloquear confirmação
+        res_misto = self.client.get(url_lote, {
+            'sel': [f'V-{self.venda_aberta.id}', f'OS-{self.os_outro.id}'],
+        })
+        self.assertEqual(res_misto.status_code, 200)
+        self.assertContains(res_misto, 'clientes diferentes')
+        self.assertNotContains(res_misto, 'id="form-finalizar-lote"')
+
+        # Seleção de um único cliente incluindo venda cancelada/já finalizada ignora as inelegíveis
+        res_ok = self.client.get(url_lote, {
+            'cliente': self.cliente1.pk,
+            'situacao': 'todos',
+            'ocultar_cancelados': '0',
+            'sel': [
+                f'V-{self.venda_aberta.id}',
+                f'OS-{self.os_aberta.id}',
+                f'V-{self.venda_cancelada.id}',
+                f'V-{self.venda_aprazo.id}',
+            ],
+        })
+        self.assertEqual(res_ok.status_code, 200)
+        self.assertContains(res_ok, 'id="form-finalizar-lote"')
+        self.assertContains(res_ok, f'VND #{self.venda_aberta.id:06d}')
+        self.assertContains(res_ok, f'OS #{self.os_aberta.id:06d}')
+        self.assertContains(res_ok, '2 documento(s) já finalizado(s) ou cancelado(s)')
+
+    def test_post_finalizacao_em_lote_quitada_com_desconto_proporcional(self):
+        from datetime import date
+        from decimal import Decimal
+        from financeiro.models import ContaBancaria, TituloFinanceiro, BaixaTitulo
+
+        conta = ContaBancaria.objects.create(descricao='Caixa Balcão Lote', tipo_conta='CAIXA_FISICO')
+        url_lote = reverse('admin:cadastro_extratocliente_finalizar_lote')
+
+        res = self.client.post(
+            f'{url_lote}?cliente={self.cliente1.pk}&situacao=abertos',
+            {
+                'sel': [f'V-{self.venda_aberta.id}', f'OS-{self.os_aberta.id}'],
+                'quitada': '1',
+                'condicao_pagamento': 'PIX',
+                'numero_parcelas': '1',
+                'intervalo_dias': '30',
+                'data_primeiro_vencimento': date.today().isoformat(),
+                'conta_destino': str(conta.pk),
+                'desconto_lote': '30.00',
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Finalização em lote concluída com sucesso')
+        self.assertContains(res, 'Imprimir Resumo do Lote')
+        self.assertContains(res, 'Imprimir Todos Detalhados')
+
+        self.venda_aberta.refresh_from_db()
+        self.os_aberta.refresh_from_db()
+        self.assertTrue(self.venda_aberta.finalizada)
+        self.assertTrue(self.os_aberta.finalizada)
+        self.assertEqual(self.venda_aberta.status, 'FINALIZADO')
+        self.assertEqual(self.os_aberta.status, 'FINALIZADO')
+
+        # Total 300.00 -> desconto 30.00 (10%) => Venda 180 -> 162.00; OS 120 -> 108.00
+        self.assertEqual(self.venda_aberta.desconto, Decimal('18.00'))
+        self.assertEqual(self.venda_aberta.valor_total, Decimal('162.00'))
+        self.assertEqual(self.os_aberta.desconto, Decimal('12.00'))
+        self.assertEqual(self.os_aberta.valor_total, Decimal('108.00'))
+
+        t_venda = TituloFinanceiro.objects.filter(venda=self.venda_aberta)
+        t_os = TituloFinanceiro.objects.filter(ordem_servico=self.os_aberta)
+        self.assertEqual(t_venda.count(), 1)
+        self.assertEqual(t_os.count(), 1)
+        self.assertEqual(t_venda.first().status, 'PAGO')
+        self.assertEqual(t_venda.first().valor_original, Decimal('162.00'))
+        self.assertEqual(t_os.first().status, 'PAGO')
+        self.assertEqual(t_os.first().valor_original, Decimal('108.00'))
+        self.assertEqual(BaixaTitulo.objects.filter(titulo=t_venda.first()).count(), 1)
+        self.assertEqual(BaixaTitulo.objects.filter(titulo=t_os.first()).count(), 1)
+
+        # Links de impressão pós-lote devem renderizar os documentos recém-finalizados
+        ctx = res.context
+        res_imp_resumo = self.client.get(ctx['url_imprimir_resumo'])
+        self.assertEqual(res_imp_resumo.status_code, 200)
+        self.assertContains(res_imp_resumo, f'VND #{self.venda_aberta.id:06d}')
+        self.assertContains(res_imp_resumo, f'OS #{self.os_aberta.id:06d}')
+
+    def test_post_finalizacao_em_lote_em_aberto_e_estorno_individual(self):
+        from datetime import date, timedelta
+        from decimal import Decimal
+        from financeiro.models import TituloFinanceiro
+
+        url_lote = reverse('admin:cadastro_extratocliente_finalizar_lote')
+        venc = (date.today() + timedelta(days=15)).isoformat()
+
+        res = self.client.post(
+            f'{url_lote}?cliente={self.cliente1.pk}&situacao=abertos',
+            {
+                'sel': [f'V-{self.venda_aberta.id}', f'OS-{self.os_aberta.id}'],
+                'quitada': '0',
+                'condicao_pagamento': 'BOLETO',
+                'numero_parcelas': '2',
+                'intervalo_dias': '30',
+                'data_primeiro_vencimento': venc,
+                'desconto_lote': '0.00',
+            },
+        )
+        self.assertEqual(res.status_code, 200)
+        self.assertContains(res, 'Finalização em lote concluída com sucesso')
+
+        self.venda_aberta.refresh_from_db()
+        self.os_aberta.refresh_from_db()
+        self.assertTrue(self.venda_aberta.finalizada)
+        self.assertTrue(self.os_aberta.finalizada)
+
+        t_venda = TituloFinanceiro.objects.filter(venda=self.venda_aberta)
+        t_os = TituloFinanceiro.objects.filter(ordem_servico=self.os_aberta)
+        self.assertEqual(t_venda.count(), 2)
+        self.assertEqual(t_os.count(), 2)
+        self.assertTrue(all(t.status == 'ABERTO' for t in t_venda))
+        self.assertTrue(all(t.status == 'ABERTO' for t in t_os))
+        self.assertEqual(sum(t.valor_original for t in t_venda), Decimal('180.00'))
+        self.assertEqual(sum(t.valor_original for t in t_os), Decimal('120.00'))
+
+        # Compatibilidade garantida com reabertura/estorno individual de um dos itens do lote
+        self.os_aberta.estornar_financeiro()
+        self.os_aberta.refresh_from_db()
+        self.assertFalse(self.os_aberta.finalizada)
+        self.assertEqual(TituloFinanceiro.objects.filter(ordem_servico=self.os_aberta).count(), 0)
+        # Venda do mesmo lote permanece finalizada intacta
+        self.assertEqual(TituloFinanceiro.objects.filter(venda=self.venda_aberta).count(), 2)
+
+    def test_lote_consumidor_final_exige_quitada(self):
+        from decimal import Decimal
+        from vendas.models import Venda, ItemVenda
+
+        v_balcao1 = Venda.objects.create(cliente=None, status='ABERTO', finalizada=False)
+        ItemVenda.objects.create(venda=v_balcao1, produto=self.produto, quantidade=Decimal('1.000'))
+        v_balcao2 = Venda.objects.create(cliente=None, status='ABERTO', finalizada=False)
+        ItemVenda.objects.create(venda=v_balcao2, produto=self.produto, quantidade=Decimal('1.000'))
+
+        url_lote = reverse('admin:cadastro_extratocliente_finalizar_lote')
+        res_erro = self.client.post(
+            url_lote,
+            {
+                'sel': [f'V-{v_balcao1.id}', f'V-{v_balcao2.id}'],
+                'quitada': '0',
+                'condicao_pagamento': 'DINHEIRO',
+                'numero_parcelas': '1',
+                'intervalo_dias': '30',
+            },
+        )
+        self.assertEqual(res_erro.status_code, 200)
+        self.assertContains(res_erro, 'só podem ser finalizadas em lote como Quitadas')
+        v_balcao1.refresh_from_db()
+        self.assertFalse(v_balcao1.finalizada)
+
+

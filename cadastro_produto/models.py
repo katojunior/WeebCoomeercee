@@ -1,7 +1,7 @@
 import calendar
 import datetime
+from decimal import Decimal
 
-from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
@@ -116,38 +116,6 @@ class UnidadeMedida(Base):
         return self.sigla or ''
 
 
-class LocalizacaoEstoque(Base):
-    """Endereço físico ou prateleira para alocação de estoque."""
-
-    codigo = models.CharField('Código / Prateleira', max_length=30, unique=True)
-    setor = models.CharField(
-        'Setor',
-        max_length=50,
-        blank=True,
-        null=True,
-        help_text='Ex: DEPOSITO, VITRINE, RMA',
-    )
-    descricao = models.CharField('Descrição', max_length=120, blank=True, null=True)
-    ativo = models.BooleanField('Ativo?', default=True)
-
-    class Meta:
-        verbose_name = 'Localização de Estoque'
-        verbose_name_plural = 'Localizações de Estoque'
-        ordering = ['codigo']
-
-    def save(self, *args, **kwargs):
-        if self.codigo:
-            self.codigo = unidecode(self.codigo).upper().strip()
-        if self.setor:
-            self.setor = unidecode(self.setor).upper().strip()
-        super().save(*args, **kwargs)
-
-    def __str__(self):
-        if self.setor:
-            return f'{self.codigo} ({self.setor})'
-        return self.codigo or ''
-
-
 class Produtos(Base):
     """Cadastro de produtos para varejo e informática com rastreio opcional de S/N."""
 
@@ -196,17 +164,30 @@ class Produtos(Base):
     preco_promocional = models.DecimalField('Preço Promocional (R$)', max_digits=12, decimal_places=2, null=True, blank=True)
     margem_lucro = models.DecimalField('Margem de Lucro (%)', max_digits=10, decimal_places=2, null=True, blank=True)
 
-    # Estoque
-    estoque_atual = models.IntegerField('Estoque Atual', default=0)
-    estoque_minimo = models.IntegerField('Estoque Mínimo', default=0)
-    estoque_maximo = models.IntegerField('Estoque Máximo', null=True, blank=True)
-    localizacao_estoque = models.ForeignKey(
-        'cadastro_produto.LocalizacaoEstoque',
-        verbose_name='Localização / Prateleira',
-        on_delete=models.RESTRICT,
+    # Estoque único
+    controla_estoque = models.BooleanField(
+        'Controla Estoque?',
+        default=True,
+        help_text='Desmarque para serviços ou itens sem controle de saldo físico.',
+    )
+    estoque_atual = models.DecimalField(
+        'Estoque Atual',
+        max_digits=12,
+        decimal_places=3,
+        default=Decimal('0.000'),
+    )
+    estoque_minimo = models.DecimalField(
+        'Estoque Mínimo',
+        max_digits=12,
+        decimal_places=3,
+        default=Decimal('0.000'),
+    )
+    estoque_maximo = models.DecimalField(
+        'Estoque Máximo',
+        max_digits=12,
+        decimal_places=3,
         null=True,
         blank=True,
-        related_name='produtos',
     )
 
     # Específico de Informática e Varejo
@@ -303,9 +284,10 @@ class Produtos(Base):
         # Quando controla número de série, o estoque é derivado exclusivamente dos seriais DISPONIVEL
         if self.controla_numero_serie and (not update_fields or 'estoque_atual' not in update_fields):
             if self.pk:
-                self.estoque_atual = self.numeros_serie.filter(status='DISPONIVEL').count()
+                qtd_disp = self.numeros_serie.filter(status='DISPONIVEL').count()
+                self.estoque_atual = Decimal(qtd_disp).quantize(Decimal('0.001'))
             else:
-                self.estoque_atual = 0
+                self.estoque_atual = Decimal('0.000')
 
         super().save(*args, **kwargs)
 
@@ -339,14 +321,6 @@ class NumeroSerie(Base):
         max_length=20,
         choices=STATUS_SERIAL_CHOICES,
         default='DISPONIVEL',
-    )
-    localizacao_estoque = models.ForeignKey(
-        'cadastro_produto.LocalizacaoEstoque',
-        verbose_name='Localização Atual',
-        on_delete=models.RESTRICT,
-        null=True,
-        blank=True,
-        related_name='numeros_serie',
     )
 
     # Rastreio de Entrada (Compra / Fornecedor)
@@ -402,30 +376,13 @@ class NumeroSerie(Base):
             return datetime.date(year, month, day)
         return None
 
-    def _sincronizar_estoque_produto(self, produto, localizacao_ids=None):
+    def _sincronizar_estoque_produto(self, produto):
         if not produto or not produto.controla_numero_serie:
             return
-        if apps.is_installed('estoque') and localizacao_ids:
-            EstoqueLocalizacao = apps.get_model('estoque', 'EstoqueLocalizacao')
-            for loc_id in {lid for lid in localizacao_ids if lid is not None}:
-                qtd = produto.numeros_serie.filter(
-                    status='DISPONIVEL',
-                    localizacao_estoque_id=loc_id,
-                ).count()
-                if qtd == 0:
-                    EstoqueLocalizacao.objects.filter(
-                        produto=produto,
-                        localizacao_id=loc_id,
-                    ).update(quantidade=0)
-                else:
-                    EstoqueLocalizacao.objects.update_or_create(
-                        produto=produto,
-                        localizacao_id=loc_id,
-                        defaults={'quantidade': qtd},
-                    )
         contagem_disponivel = produto.numeros_serie.filter(status='DISPONIVEL').count()
-        if produto.estoque_atual != contagem_disponivel:
-            produto.estoque_atual = contagem_disponivel
+        novo_saldo = Decimal(contagem_disponivel).quantize(Decimal('0.001'))
+        if produto.estoque_atual != novo_saldo:
+            produto.estoque_atual = novo_saldo
             produto.save(update_fields=['estoque_atual'])
 
     def save(self, *args, **kwargs):
@@ -440,30 +397,17 @@ class NumeroSerie(Base):
         if self.status == 'VENDIDO' and self.data_venda and not self.data_fim_garantia:
             self.data_fim_garantia = self.calcular_data_fim_garantia()
 
-        loc_ids = set()
-        if self.pk:
-            anterior_loc_id = (
-                NumeroSerie.objects.filter(pk=self.pk)
-                .values_list('localizacao_estoque_id', flat=True)
-                .first()
-            )
-            if anterior_loc_id:
-                loc_ids.add(anterior_loc_id)
-        if self.localizacao_estoque_id:
-            loc_ids.add(self.localizacao_estoque_id)
-
         skip_sync = getattr(self, '_skip_sync_estoque', False)
         super().save(*args, **kwargs)
         if not skip_sync:
-            self._sincronizar_estoque_produto(self.produto, loc_ids)
+            self._sincronizar_estoque_produto(self.produto)
 
     def delete(self, *args, **kwargs):
         produto = self.produto
-        loc_id = self.localizacao_estoque_id
         skip_sync = getattr(self, '_skip_sync_estoque', False)
         super().delete(*args, **kwargs)
         if not skip_sync:
-            self._sincronizar_estoque_produto(produto, {loc_id} if loc_id else None)
+            self._sincronizar_estoque_produto(produto)
 
     def __str__(self):
         return f'{self.numero_serie} ({self.produto.nome}) - {self.get_status_display()}'
